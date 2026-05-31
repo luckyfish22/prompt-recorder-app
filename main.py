@@ -3,6 +3,7 @@ import os
 from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QCursor
 from src.ui.floating_window import FloatingWindow
 from src.ui.main_window import MainWindow
 from src.ui.theme import set_app_font
@@ -10,18 +11,20 @@ from src.config_loader import config
 
 
 def _create_tray_icon():
-    """Generate a simple tray icon (orange circle)."""
+    """Generate a tray icon — artistic 'P' letter."""
     size = 32
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.transparent)
 
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setBrush(QColor("#D97757"))
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.drawEllipse(4, 4, size - 8, size - 8)
-    painter.setPen(QColor("white"))
-    painter.setFont(QFont("Microsoft YaHei", 14, QFont.Weight.Bold))
+
+    # Artistic P
+    font = QFont("Georgia", 18)
+    font.setItalic(True)
+    font.setBold(True)
+    painter.setFont(font)
+    painter.setPen(QColor("#D97757"))
     painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "P")
     painter.end()
 
@@ -63,16 +66,17 @@ def main():
     restart_action.triggered.connect(_restart)
     tray_menu.addSeparator()
     quit_action = tray_menu.addAction("Exit")
-    tray.setContextMenu(tray_menu)
 
-    # Create windows
+    # Create windows first (needed by menu actions)
     floating = FloatingWindow()
     window = MainWindow(floating_window=floating)
 
-    # Tray click → restore
+    # Tray click → left=restore, right=popup menu (auto-dismiss)
     def on_tray_activated(reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             window.restore()
+        elif reason == QSystemTrayIcon.ActivationReason.Context:
+            tray_menu.popup(QCursor.pos())
     tray.activated.connect(on_tray_activated)
 
     # Menu actions

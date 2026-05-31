@@ -131,6 +131,8 @@ class FloatingWindow(QWidget):
                 border-radius: 4px;
             }}
         """)
+        self._trans_input.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._trans_input.customContextMenuRequested.connect(self._on_trans_context_menu)
         self._trans_input.textChanged.connect(self._on_trans_text_changed)
         self._trans_input.hide()
         layout.addWidget(self._trans_input, stretch=1)
@@ -526,14 +528,32 @@ class FloatingWindow(QWidget):
         if not text:
             return
         self._trans_label.setText(text)
-        # Position popup below the input field
-        pos = self._trans_input.mapToGlobal(
-            QPoint(0, self._trans_input.height() + 4))
-        self._trans_popup.move(pos)
+        # Position popup below the floating window, clamped to its width
+        max_w = self.width() - 20  # 10px margin each side
+        self._trans_popup.setMaximumWidth(max_w)
         self._trans_popup.adjustSize()
-        w = max(self._trans_input.width(), self._trans_popup.width())
+        w = min(self._trans_popup.width(), max_w)
+        pos = self.mapToGlobal(QPoint(10, self.height() + 4))
+        self._trans_popup.move(pos)
         self._trans_popup.resize(w, self._trans_popup.height())
         self._trans_popup.show()
+
+    def _on_trans_context_menu(self, pos):
+        menu = self._trans_input.createStandardContextMenu()
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 4px 0px;
+                color: {COLORS['text_primary']};
+                font-size: 14px;
+            }}
+            QMenu::item {{ padding: 4px 20px; }}
+            QMenu::item:selected {{ background-color: {COLORS['accent_bg']}; }}
+            QMenu::separator {{ height: 1px; background: {COLORS['border']}; margin: 3px 10px; }}
+        """)
+        menu.exec_(self._trans_input.mapToGlobal(pos))
 
     def _copy_translation(self):
         text = self._trans_label.text()

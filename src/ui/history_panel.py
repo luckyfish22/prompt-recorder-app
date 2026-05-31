@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QLineEdit, QListWidget,
                                  QInputDialog, QDialog, QPushButton, QTextEdit,
                                  QDialogButtonBox)
 from PyQt5.QtCore import pyqtSignal, Qt, QMimeData, QPoint, QItemSelectionModel, QTimer
-from PyQt5.QtGui import QCursor, QDrag
+from PyQt5.QtGui import QCursor, QDrag, QPainter, QPen, QColor
 from src.db import database
 from src.ui.theme import COLORS, FONT_BODY, FONT_CAPTION, FONT_MICRO
 from src.ui.folder_bar import FOLDER_MIME
@@ -12,20 +12,31 @@ from src.ui.folder_bar import FOLDER_MIME
 REORDER_MIME = "application/x-promptrecorder-reorder"
 
 
-class _GripLabel(QLabel):
-    """Drag handle for reordering prompts within the list."""
+class _GripLabel(QWidget):
+    """Drag handle — three horizontal lines (hamburger) icon."""
 
     drag_started = pyqtSignal(int)  # prompt_id
 
     def __init__(self, prompt_id: int):
-        super().__init__("⠁⠁")
+        super().__init__()
         self._prompt_id = prompt_id
         self._drag_start_pos = None
+        self.setFixedSize(20, 22)
         self.setCursor(Qt.OpenHandCursor)
-        self.setStyleSheet(
-            f"color: {COLORS['text_secondary']}; font-size: 14px; "
-            f"background: transparent; border: none; padding: 0px 4px;"
-        )
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        color = QColor(COLORS["text_secondary"])
+        pen = QPen(color)
+        pen.setWidthF(1.5)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        w = self.width()
+        margin = 4
+        for i in range(3):
+            y = 5 + i * 6
+            painter.drawLine(margin, y, w - margin, y)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -172,12 +183,12 @@ class HistoryPanel(QWidget):
         w.setToolTip(f"<div style='font-size:18px'>{text}</div>")
 
         outer = QHBoxLayout(w)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(4)
+        outer.setContentsMargins(4, 0, 0, 0)
+        outer.setSpacing(6)
 
         # Drag grip handle
         grip = _GripLabel(prompt["id"])
-        outer.addWidget(grip, alignment=Qt.AlignTop)
+        outer.addWidget(grip, alignment=Qt.AlignVCenter)
 
         inner = QVBoxLayout()
         inner.setContentsMargins(0, 10, 12, 10)

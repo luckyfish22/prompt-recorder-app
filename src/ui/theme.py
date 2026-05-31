@@ -11,9 +11,39 @@ COLORS = {
 
 FONT_FAMILY = "Microsoft YaHei"
 MONO_FONT = "Consolas"
-FONT_SIZE = 17
-FONT_SIZE_SMALL = 14
-FONT_SIZE_TITLE = 19
+
+# ── Font sizes ──────────────────────────────────
+#  修改以下数值即可全局调整字号，重启 app 生效。
+
+FONT_BODY    = 22  # 正文：输入框、提示词列表项、按钮文字
+FONT_HEADER  = 22  # 区域标题：各面板标题（"History"、"Input"）
+FONT_CAPTION = 19  # 辅助标签：文件夹标签、状态栏、设置项标签
+FONT_MICRO   = 15  # 微小文字：历史记录时间戳
+FONT_FLOAT   = 17  # 悬浮窗：下拉框、翻译输入框
+FONT_TITLE   = 28  # 主标题：顶部 "Prompt Recorder"
+
+FONT_LIBRARY = [
+    "Microsoft YaHei",
+    "Segoe UI",
+    "DengXian",
+    "SimSun",
+    "KaiTi",
+    "FangSong",
+    "Arial",
+    "Times New Roman",
+    "Georgia",
+    "Consolas",
+    "Cascadia Code",
+]
+
+
+def set_app_font(app, font_family: str):
+    """Apply a font family globally across the app."""
+    from PyQt5.QtGui import QFont
+    global FONT_FAMILY
+    FONT_FAMILY = font_family
+    font = QFont(font_family, FONT_BODY)
+    app.setFont(font)
 
 STYLESHEET = f"""
 QMainWindow {{
@@ -22,8 +52,8 @@ QMainWindow {{
 
 QLabel {{
     color: {COLORS["text_primary"]};
-    font-family: "{FONT_FAMILY}";
-    font-size: {FONT_SIZE}px;
+    
+    font-size: {FONT_BODY}px;
 }}
 
 QLineEdit, QTextEdit, QPlainTextEdit {{
@@ -32,8 +62,8 @@ QLineEdit, QTextEdit, QPlainTextEdit {{
     border-radius: 4px;
     padding: 8px;
     color: {COLORS["text_primary"]};
-    font-family: "{FONT_FAMILY}";
-    font-size: {FONT_SIZE}px;
+    
+    font-size: {FONT_BODY}px;
 }}
 
 QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {{
@@ -46,8 +76,8 @@ QPushButton {{
     border: none;
     border-radius: 4px;
     padding: 8px 24px;
-    font-family: "{FONT_FAMILY}";
-    font-size: {FONT_SIZE}px;
+    
+    font-size: {FONT_BODY}px;
 }}
 
 QPushButton:hover {{
@@ -74,8 +104,8 @@ QListWidget {{
     border: 1px solid {COLORS["border"]};
     border-radius: 4px;
     color: {COLORS["text_primary"]};
-    font-family: "{FONT_FAMILY}";
-    font-size: {FONT_SIZE}px;
+    
+    font-size: {FONT_BODY}px;
     outline: none;
 }}
 
@@ -123,8 +153,8 @@ QComboBox {{
     border-radius: 4px;
     padding: 6px 12px;
     color: {COLORS["text_primary"]};
-    font-family: "{FONT_FAMILY}";
-    font-size: {FONT_SIZE}px;
+    
+    font-size: {FONT_BODY}px;
 }}
 
 QComboBox:focus {{
@@ -138,8 +168,8 @@ QComboBox::drop-down {{
 
 QCheckBox {{
     color: {COLORS["text_primary"]};
-    font-family: "{FONT_FAMILY}";
-    font-size: {FONT_SIZE}px;
+    
+    font-size: {FONT_BODY}px;
 }}
 
 QCheckBox::indicator {{
@@ -153,5 +183,13 @@ QCheckBox::indicator {{
 QCheckBox::indicator:checked {{
     background-color: {COLORS["primary"]};
     border-color: {COLORS["primary"]};
+}}
+
+QToolTip {{
+    font-size: 12px;
+}}
+
+QMenu {{
+    font-size: 16px;
 }}
 """

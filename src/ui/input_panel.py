@@ -1,10 +1,11 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QTextEdit
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QTextEdit
 from PyQt5.QtCore import pyqtSignal, Qt
-from src.ui.theme import COLORS, FONT_SIZE_SMALL, MONO_FONT
+from PyQt5.QtGui import QKeyEvent
+from src.ui.theme import COLORS, MONO_FONT
 
 
 class InputPanel(QWidget):
-    analyze_requested = pyqtSignal(str)
+    save_requested = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -15,31 +16,30 @@ class InputPanel(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
-        header = QLabel("Enter Prompt")
-        header.setStyleSheet(f"font-size: {FONT_SIZE_SMALL + 2}px; color: {COLORS['text_secondary']}; font-weight: bold;")
-        layout.addWidget(header)
-
         self._text_edit = QTextEdit()
         self._text_edit.setPlaceholderText("Type or paste your prompt here...")
         self._text_edit.setFontFamily(MONO_FONT)
         self._text_edit.setMinimumHeight(200)
+        self._text_edit.installEventFilter(self)
         layout.addWidget(self._text_edit, stretch=1)
 
-        self._analyze_btn = QPushButton("Analyze")
-        self._analyze_btn.setCursor(Qt.PointingHandCursor)
-        self._analyze_btn.clicked.connect(self._on_analyze)
-        layout.addWidget(self._analyze_btn)
+        self._save_btn = QPushButton("Save")
+        self._save_btn.setCursor(Qt.PointingHandCursor)
+        self._save_btn.clicked.connect(self._on_save)
+        layout.addWidget(self._save_btn)
 
-    def _on_analyze(self):
+    def eventFilter(self, obj, event):
+        if obj is self._text_edit and event.type() == QKeyEvent.KeyPress:
+            if event.key() in (Qt.Key_Return, Qt.Key_Enter) and not event.modifiers():
+                self._on_save()
+                return True
+        return super().eventFilter(obj, event)
+
+    def _on_save(self):
         text = self._text_edit.toPlainText().strip()
         if text:
-            self._analyze_btn.setEnabled(False)
-            self._analyze_btn.setText("Analyzing...")
-            self.analyze_requested.emit(text)
-
-    def on_analysis_done(self):
-        self._analyze_btn.setEnabled(True)
-        self._analyze_btn.setText("Analyze")
+            self.save_requested.emit(text)
+            self._text_edit.clear()
 
     def clear(self):
         self._text_edit.clear()

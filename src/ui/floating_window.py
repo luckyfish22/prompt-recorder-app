@@ -1,27 +1,88 @@
 from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QComboBox, QPushButton,
-                                 QApplication, QSizePolicy, QMenu)
-from PyQt5.QtCore import Qt, pyqtSignal, QEvent
+                                 QApplication, QSizePolicy, QMenu, QLineEdit,
+                                 QLabel, QFrame, QVBoxLayout)
+from PyQt5.QtCore import Qt, pyqtSignal, QEvent, QTimer, QThread, QPoint
 import math
 from PyQt5.QtGui import QMouseEvent, QCursor, QPainter, QPen, QColor, QPainterPath
 from src.db import database
-from src.ui.theme import COLORS, FONT_SIZE, FONT_SIZE_SMALL, FONT_FAMILY
+from src.ui.theme import COLORS, FONT_FLOAT
+from src.config_loader import config
+from src.api.deepseek_client import DeepSeekClient
+
+TRANSLATION_PROMPT = """You are a Chinese-English translator.
+- If the input is Chinese, translate to natural English.
+- If the input is English, translate to natural Chinese.
+- Return ONLY the translation, no explanations, no quotes, no prefixes."""
+
+
+
+class _ModeToggle(QPushButton):
+    """Toggle button that draws a square with a diagonal slash."""
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(28, 28)
+        self.setCursor(Qt.PointingHandCursor)
+        self._active = False
+
+    def set_active(self, active: bool):
+        self._active = active
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        s = 4
+        w = self.width() - 2 * s
+        h = self.height() - 2 * s
+        color = QColor(COLORS["primary"] if self._active else COLORS["text_secondary"])
+        pen = QPen(color)
+        pen.setWidthF(1.8)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(s, s, w, h, 4, 4)
+        pad = 5
+        painter.drawLine(s + w - pad, s + pad, s + pad, s + h - pad)
+
+
+class _TranslationWorker(QThread):
+    finished = pyqtSignal(str)
+
+    def __init__(self, text: str, client: DeepSeekClient):
+        super().__init__()
+        self._text = text
+        self._client = client
+
+    def run(self):
+        try:
+            result = self._client.chat(TRANSLATION_PROMPT, self._text, temperature=0.3)
+            self.finished.emit(result.strip())
+        except Exception:
+            pass
 
 
 class FloatingWindow(QWidget):
     show_main_requested = pyqtSignal()
+    folder_selected = pyqtSignal(object)  # folder_id or None (All)
 
     def __init__(self):
         super().__init__(flags=Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self._drag_pos = None
+        self._translation_mode = False
+        self._trans_timer = QTimer(self)
+        self._trans_timer.setSingleShot(True)
+        self._trans_timer.timeout.connect(self._do_translate)
+        self._trans_worker = None
+        self._client = DeepSeekClient(config.api_key, config.model)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
         self._init_ui()
         self.refresh()
 
     def _init_ui(self):
-        self.setFixedHeight(46)
-        self.setMinimumWidth(300)
-        self.resize(380, 46)
+        self.setFixedHeight(52)
+        self.setMinimumWidth(340)
+        self.resize(420, 52)
         self.setAttribute(Qt.WA_Hover, True)
         self.setObjectName("floatingWindow")
         self.setStyleSheet(f"""
@@ -35,6 +96,70 @@ class FloatingWindow(QWidget):
         layout.setContentsMargins(10, 6, 10, 6)
         layout.setSpacing(6)
 
+        # Mode toggle button — square with diagonal slash
+        self._mode_btn = _ModeToggle()
+        self._mode_btn.setToolTip("Switch to translation mode")
+        self._mode_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: none;
+                border-radius: 5px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['accent_bg']};
+            }}
+        """)
+        self._mode_btn.clicked.connect(self._toggle_mode)
+        layout.addWidget(self._mode_btn)
+
+        # Translation input (hidden in normal mode)
+        self._trans_input = QLineEdit()
+        self._trans_input.setPlaceholderText("Type to translate...")
+        self._trans_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: transparent;
+                border: none;
+                color: {COLORS['text_primary']};
+                
+                font-size: {FONT_FLOAT}px;
+                padding: 2px 4px;
+            }}
+            QLineEdit:focus {{
+                border: none;
+                background-color: {COLORS['accent_bg']};
+                border-radius: 4px;
+            }}
+        """)
+        self._trans_input.textChanged.connect(self._on_trans_text_changed)
+        self._trans_input.hide()
+        layout.addWidget(self._trans_input, stretch=1)
+
+        # Translation result popup (dropdown below input)
+        self._trans_popup = QFrame()
+        self._trans_popup.setWindowFlags(Qt.ToolTip | Qt.FramelessWindowHint)
+        self._trans_popup.setMinimumWidth(300)
+        self._trans_popup.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 6px;
+            }}
+        """)
+        popup_layout = QVBoxLayout(self._trans_popup)
+        popup_layout.setContentsMargins(12, 10, 12, 10)
+        self._trans_label = QLabel("")
+        self._trans_label.setWordWrap(True)
+        self._trans_label.setStyleSheet(
+            f"color: {COLORS['text_primary']}; font-size: {FONT_FLOAT}px; "
+            f"border: none; background: transparent; "
+            f"padding: 4px 2px; line-height: 1.5;"
+        )
+        self._trans_label.setCursor(Qt.PointingHandCursor)
+        self._trans_label.mousePressEvent = lambda e: self._copy_translation()
+        popup_layout.addWidget(self._trans_label)
+        self._trans_popup.hide()
+
         self._combo = QComboBox()
         self._combo.setCursor(Qt.PointingHandCursor)
         self._combo.setMaximumWidth(220)
@@ -44,8 +169,8 @@ class FloatingWindow(QWidget):
                 background-color: transparent;
                 border: none;
                 color: {COLORS['text_primary']};
-                font-family: "{FONT_FAMILY}";
-                font-size: {FONT_SIZE}px;
+
+                font-size: {FONT_FLOAT}px;
                 padding: 2px 4px;
             }}
             QComboBox:hover {{
@@ -61,7 +186,7 @@ class FloatingWindow(QWidget):
                 border: 1px solid {COLORS['border']};
                 border-radius: 4px;
                 color: {COLORS['text_primary']};
-                font-size: {FONT_SIZE}px;
+                font-size: {FONT_FLOAT}px;
                 selection-background-color: {COLORS['accent_bg']};
                 selection-color: {COLORS['text_primary']};
                 padding: 4px;
@@ -80,8 +205,30 @@ class FloatingWindow(QWidget):
 
         layout.addStretch()
 
+        # Star button — Edge-style favorites dropdown
+        self._star_btn = QPushButton("★")
+        self._star_btn.setFixedSize(36, 36)
+        self._star_btn.setCursor(Qt.PointingHandCursor)
+        self._star_btn.setToolTip("Favorites")
+        self._star_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {COLORS['text_secondary']};
+                border: none;
+                border-radius: 13px;
+                font-size: 20px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['accent_bg']};
+                color: {COLORS['primary']};
+            }}
+        """)
+        self._star_btn.clicked.connect(self._show_favorites_menu)
+        layout.addWidget(self._star_btn)
+
         self._main_btn = QPushButton("+")
-        self._main_btn.setFixedSize(28, 28)
+        self._main_btn.setFixedSize(36, 36)
         self._main_btn.setCursor(Qt.PointingHandCursor)
         self._main_btn.setToolTip("Open main window")
         self._main_btn.setStyleSheet(f"""
@@ -90,7 +237,7 @@ class FloatingWindow(QWidget):
                 color: {COLORS['primary']};
                 border: none;
                 border-radius: 13px;
-                font-size: {FONT_SIZE}px;
+                font-size: 24px;
                 font-weight: bold;
                 padding: 0px;
             }}
@@ -117,7 +264,8 @@ class FloatingWindow(QWidget):
             text = p.get("optimized_text") or p["original_text"]
             self._combo.addItem(f"  {title}", text)
             idx = self._combo.count() - 1
-            self._combo.setItemData(idx, text, Qt.ToolTipRole)
+            escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            self._combo.setItemData(idx, f"<span style='font-size:18px'>{escaped}</span>", Qt.ToolTipRole)
         self._combo.setCurrentIndex(0)
 
     def _on_item_selected(self, index):
@@ -326,12 +474,128 @@ class FloatingWindow(QWidget):
         self._drag_pos = None
         super().mouseReleaseEvent(event)
 
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        if self._translation_mode:
+            self._trans_popup.hide()
+
     def show_and_position(self):
         screen = QApplication.primaryScreen().availableGeometry()
         x = screen.right() - self.width() - 20
         y = screen.top() + 20
         self.move(x, y)
         self.show()
+
+    # --- Translation mode ---
+
+    def _toggle_mode(self):
+        self._translation_mode = not self._translation_mode
+        self._mode_btn.set_active(self._translation_mode)
+        if self._translation_mode:
+            self._mode_btn.setToolTip("Exit translation mode")
+            self._combo.hide()
+            self._trans_input.show()
+            self._trans_input.setFocus()
+            self._star_btn.hide()
+            self.resize(460, 52)
+        else:
+            self._mode_btn.setToolTip("Switch to translation mode")
+            self._trans_input.hide()
+            self._trans_popup.hide()
+            self._combo.show()
+            self._star_btn.show()
+            self.resize(420, 52)
+            self._trans_input.clear()
+
+    def _on_trans_text_changed(self, text: str):
+        if not text.strip():
+            self._trans_popup.hide()
+            return
+        self._trans_timer.stop()
+        self._trans_timer.start(500)
+
+    def _do_translate(self):
+        text = self._trans_input.text().strip()
+        if not text or not self._client.is_configured:
+            return
+        self._trans_worker = _TranslationWorker(text, self._client)
+        self._trans_worker.finished.connect(self._on_translation_result)
+        self._trans_worker.start()
+
+    def _on_translation_result(self, text: str):
+        if not text:
+            return
+        self._trans_label.setText(text)
+        # Position popup below the input field
+        pos = self._trans_input.mapToGlobal(
+            QPoint(0, self._trans_input.height() + 4))
+        self._trans_popup.move(pos)
+        self._trans_popup.adjustSize()
+        w = max(self._trans_input.width(), self._trans_popup.width())
+        self._trans_popup.resize(w, self._trans_popup.height())
+        self._trans_popup.show()
+
+    def _copy_translation(self):
+        text = self._trans_label.text()
+        if text:
+            QApplication.clipboard().setText(text)
+
+    def _show_favorites_menu(self):
+        menu = QMenu(self)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 4px 0px;
+                color: {COLORS['text_primary']};
+                font-size: {FONT_FLOAT}px;
+            }}
+            QMenu::item {{
+                padding: 6px 24px;
+            }}
+            QMenu::item:selected {{
+                background-color: {COLORS['accent_bg']};
+            }}
+        """)
+
+        # "All" submenu
+        all_menu = menu.addMenu("  All")
+        all_menu.addAction("Open in main window").triggered.connect(
+            lambda: self._on_folder_clicked(None))
+        all_menu.addSeparator()
+        self._fill_prompt_items(all_menu, None)
+
+        folders = database.get_all_folders()
+        if folders:
+            menu.addSeparator()
+            for f in folders:
+                folder_menu = menu.addMenu(f"  {f['name']}")
+                folder_menu.addAction("Open in main window").triggered.connect(
+                    lambda checked, fid=f["id"]: self._on_folder_clicked(fid))
+                folder_menu.addSeparator()
+                self._fill_prompt_items(folder_menu, f["id"])
+
+        menu.exec_(self._star_btn.mapToGlobal(self._star_btn.rect().bottomLeft()))
+
+    def _fill_prompt_items(self, menu, folder_id):
+        prompts = database.get_all_prompts(folder_id=folder_id)
+        if not prompts:
+            empty = menu.addAction("  (empty)")
+            empty.setEnabled(False)
+            return
+        for p in prompts[:30]:
+            title = p.get("title") or p["original_text"].replace("\n", " ")[:25]
+            text = p.get("optimized_text") or p["original_text"]
+            action = menu.addAction(f"  {title}")
+            action.triggered.connect(lambda checked, t=text: self._copy_prompt(t))
+
+    def _copy_prompt(self, text: str):
+        QApplication.clipboard().setText(text)
+
+    def _on_folder_clicked(self, folder_id):
+        self.folder_selected.emit(folder_id)
+        self.show_main_requested.emit()
 
     def _on_context_menu(self, pos):
         menu = QMenu(self)
@@ -342,7 +606,7 @@ class FloatingWindow(QWidget):
                 border-radius: 4px;
                 padding: 4px 0px;
                 color: {COLORS['text_primary']};
-                font-size: {FONT_SIZE}px;
+                font-size: {FONT_FLOAT}px;
             }}
             QMenu::item {{
                 padding: 6px 24px;

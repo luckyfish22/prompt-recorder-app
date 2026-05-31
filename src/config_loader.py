@@ -8,7 +8,7 @@ DEFAULT_CONFIG = {
     "model": "deepseek-chat",
     "enable_optimization": True,
     "enable_autostart": False,
-    "categories": ["Coding", "Writing", "Translation", "Analysis", "Creative"],
+    "font_family": "Microsoft YaHei",
 }
 
 
@@ -51,12 +51,12 @@ class Config:
         return self._data.get("enable_optimization", True)
 
     @property
-    def categories(self):
-        return self._data.get("categories", [])
-
-    @property
     def enable_autostart(self):
         return self._data.get("enable_autostart", False)
+
+    @property
+    def font_family(self):
+        return self._data.get("font_family", "Microsoft YaHei")
 
 
 # Global config instance

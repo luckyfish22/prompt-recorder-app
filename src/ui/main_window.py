@@ -1,49 +1,81 @@
 from PyQt5.QtWidgets import (QMainWindow, QSplitter, QHBoxLayout, QVBoxLayout,
-                                 QWidget, QPushButton, QLabel, QMessageBox, QDialog)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QCloseEvent
+                                 QWidget, QPushButton, QLabel, QMessageBox, QDialog,
+                                 QApplication)
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSize
+from PyQt5.QtGui import QCloseEvent, QPainter, QFont, QPen, QColor, QFontMetrics
 from src.config_loader import config
 from src.api.deepseek_client import DeepSeekClient
-from src.services.categorizer import Categorizer
-from src.services.optimizer import Optimizer
 from src.db import database
-from src.ui.theme import STYLESHEET, COLORS, FONT_SIZE_SMALL
+from src.ui.theme import STYLESHEET, COLORS, FONT_CAPTION, FONT_TITLE, set_app_font
 from src.ui.input_panel import InputPanel
-from src.ui.result_panel import ResultPanel
 from src.ui.history_panel import HistoryPanel
+from src.ui.folder_bar import FolderBar
+from src.ui.analysis_dialog import AnalysisDialog
 from src.ui.settings_dialog import SettingsDialog
 
 
-class AnalysisWorker(QThread):
-    finished = pyqtSignal(dict)
-    progress = pyqtSignal(str)
+TITLE_SYSTEM_PROMPT = """Generate a concise, meaningful title for the following prompt.
+Rules:
+- Max 20 characters
+- Capture the core topic or task
+- Use the same language as the prompt
+- Return ONLY the title text, no quotes, no prefixes, no explanation."""
 
-    def __init__(self, prompt_text: str, client: DeepSeekClient, enable_optimization: bool):
+
+class _TitleWorker(QThread):
+    finished = pyqtSignal(int, str)  # prompt_id, title
+
+    def __init__(self, prompt_id: int, prompt_text: str, client: DeepSeekClient):
         super().__init__()
-        self._prompt = prompt_text
+        self._prompt_id = prompt_id
+        self._prompt_text = prompt_text
         self._client = client
-        self._enable_optimization = enable_optimization
 
     def run(self):
         try:
-            categorizer = Categorizer(self._client)
-            title, category = categorizer.classify(self._prompt)
+            title = self._client.chat(TITLE_SYSTEM_PROMPT, self._prompt_text, temperature=0.3)
+            title = title.strip().replace("\n", " ")[:30]
+            self.finished.emit(self._prompt_id, title)
+        except Exception:
+            pass  # Keep the temp title on failure
 
-            optimized = ""
-            notes = ""
-            if self._enable_optimization:
-                self.progress.emit("Optimizing...")
-                optimizer = Optimizer(self._client)
-                optimized, notes = optimizer.optimize(self._prompt)
 
-            self.finished.emit({
-                "title": title,
-                "category": category,
-                "optimized": optimized,
-                "notes": notes,
-            })
-        except Exception as e:
-            self.finished.emit({"error": str(e)})
+class _TitleLabel(QLabel):
+    """Title label with painted stroke for extra boldness."""
+
+    def __init__(self, text: str, color: str, size: int):
+        super().__init__(text)
+        self._color = QColor(color)
+        self._size = size
+        self.setMinimumHeight(size + 12)
+
+    def sizeHint(self):
+        fm = QFontMetrics(QFont(self.font().family(), self._size))
+        sz = fm.size(0, self.text())
+        return sz + QSize(sz.height() // 2 + 8, 12)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        font = QFont(self.font())
+        font.setPixelSize(self._size)
+        font.setItalic(True)
+        font.setBold(True)
+        painter.setFont(font)
+
+        outline = QColor(
+            max(0, self._color.red() - 50),
+            max(0, self._color.green() - 40),
+            max(0, self._color.blue() - 30),
+        )
+        pen = QPen(outline)
+        pen.setWidthF(1.5)
+        painter.setPen(pen)
+        painter.setBrush(self._color)
+        rect = self.rect()
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            r = rect.translated(dx, dy)
+            painter.drawText(r, Qt.AlignVCenter, self.text())
 
 
 class MainWindow(QMainWindow):
@@ -51,16 +83,11 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._floating = floating_window
         self._client = DeepSeekClient(config.api_key, config.model)
-        self._current_prompt = ""
-        self._current_title = ""
-        self._current_category = ""
-        self._current_optimized = ""
-        self._current_notes = ""
-        self._worker = None
+        self._current_folder_id = None
 
         self.setWindowTitle("Prompt Recorder")
-        self.setMinimumSize(900, 500)
-        self.resize(1200, 750)
+        self.setMinimumSize(700, 500)
+        self.resize(1100, 750)
         self.setStyleSheet(STYLESHEET)
 
         self._init_ui()
@@ -77,10 +104,9 @@ class MainWindow(QMainWindow):
         title_bar = QWidget()
         title_bar.setStyleSheet(f"background-color: {COLORS['surface']}; border-bottom: 1px solid {COLORS['border']};")
         title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(16, 10, 16, 10)
+        title_layout.setContentsMargins(16, 14, 16, 14)
 
-        title = QLabel("Prompt Recorder")
-        title.setStyleSheet(f"font-size: 16px; color: {COLORS['text_primary']}; font-weight: bold; border: none;")
+        title = _TitleLabel("Prompt  Recorder", COLORS["primary"], FONT_TITLE)
 
         self._settings_btn = QPushButton("Settings")
         self._settings_btn.setProperty("secondary", True)
@@ -91,127 +117,113 @@ class MainWindow(QMainWindow):
         title_layout.addStretch()
         title_layout.addWidget(self._settings_btn)
 
-        # Three-panel splitter
+        # Folder bar
+        self._folder_bar = FolderBar()
+        self._folder_bar.folder_changed.connect(self._on_folder_changed)
+
+        # Two-panel splitter
         splitter = QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(1)
 
         self._input_panel = InputPanel()
-        self._result_panel = ResultPanel()
         self._history_panel = HistoryPanel()
 
         splitter.addWidget(self._input_panel)
-        splitter.addWidget(self._result_panel)
         splitter.addWidget(self._history_panel)
-        splitter.setSizes([400, 400, 400])
+        splitter.setSizes([400, 700])
 
         # Status bar
         self._status = QLabel("")
         self._status.setStyleSheet(
-            f"color: {COLORS['text_secondary']}; font-size: {FONT_SIZE_SMALL}px; padding: 4px 16px; "
+            f"color: {COLORS['text_secondary']}; font-size: {FONT_CAPTION}px; padding: 4px 16px; "
             f"background: {COLORS['bg']}; border-top: 1px solid {COLORS['border']};"
         )
 
         root_layout.addWidget(title_bar)
+        root_layout.addWidget(self._folder_bar)
         root_layout.addWidget(splitter, stretch=1)
         root_layout.addWidget(self._status)
 
         # Connect signals
-        self._input_panel.analyze_requested.connect(self._on_analyze)
-        self._result_panel.accept_clicked.connect(self._on_accept)
-        self._result_panel.keep_clicked.connect(self._on_keep)
+        self._input_panel.save_requested.connect(self._on_save_prompt)
         self._history_panel.prompt_selected.connect(self._on_history_select)
+        self._history_panel.prompt_deleted.connect(self._on_prompt_deleted)
+        self._history_panel.analysis_requested.connect(self._on_analysis_requested)
+        self._history_panel.prompt_changed.connect(self._on_prompt_changed)
 
-    def _on_analyze(self, text: str):
-        self._current_prompt = text
-        self._result_panel.clear()
-        self._status.setText("Analyzing...")
+        if self._floating:
+            self._floating.folder_selected.connect(self._on_floating_folder_selected)
 
-        self._client.update_config(config.api_key, config.model)
+    def _on_floating_folder_selected(self, folder_id):
+        self._folder_bar.select_folder(folder_id)
 
-        self._worker = AnalysisWorker(text, self._client, config.enable_optimization)
-        self._worker.progress.connect(lambda msg: self._status.setText(msg))
-        self._worker.finished.connect(self._on_analysis_done)
-        self._worker.start()
-
-    def _on_analysis_done(self, result: dict):
-        self._input_panel.on_analysis_done()
-        self._worker = None
-
-        if "error" in result:
-            self._result_panel.clear()
-            self._status.setText(f"Error: {result['error']}")
-            QMessageBox.warning(self, "Analysis Failed", f"API call failed:\n{result['error']}")
-            return
-
-        self._current_title = result.get("title", "")
-        self._current_category = result["category"]
-        self._current_optimized = result.get("optimized", "")
-        self._current_notes = result.get("notes", "")
-
-        self._result_panel.show_result(
-            original=self._current_prompt,
-            category=self._current_category,
-            optimized=self._current_optimized,
-            notes=self._current_notes,
-            optimization_enabled=config.enable_optimization,
-        )
-        self._status.setText("Analysis complete")
-
-    def _on_accept(self):
-        self._save_prompt(is_optimized=1)
-        self._status.setText("Saved (optimized)")
-
-    def _on_keep(self):
-        self._save_prompt(is_optimized=0)
-        self._status.setText("Saved (original)")
-
-    def _save_prompt(self, is_optimized: int):
-        cat_id = self._ensure_category(self._current_category)
-        optimized_text = self._current_optimized if is_optimized else None
-        database.save_prompt(
-            title=self._current_title,
-            original_text=self._current_prompt,
-            category_id=cat_id,
-            optimized_text=optimized_text,
-            is_optimized=is_optimized,
-            optimization_note=self._current_notes if self._current_notes else None,
-        )
-        self._history_panel.refresh()
+    def _on_prompt_changed(self):
         if self._floating:
             self._floating.refresh()
 
-    def _ensure_category(self, name: str) -> int:
-        cats = database.get_all_categories()
-        for c in cats:
-            if c["name"] == name:
-                return c["id"]
-        database.add_category(name)
-        cats = database.get_all_categories()
-        for c in cats:
-            if c["name"] == name:
-                return c["id"]
-        return 0
+    def _on_save_prompt(self, text: str):
+        title = text.replace("\n", " ")[:30]
+        prompt_id = database.save_prompt(
+            title=title,
+            original_text=text,
+            folder_id=self._current_folder_id,
+        )
+        self._history_panel.refresh(folder_id=self._current_folder_id)
+        if self._floating:
+            self._floating.refresh()
+        self._status.setText("Saved")
+
+        # Async AI title generation
+        if self._client.is_configured:
+            self._title_worker = _TitleWorker(prompt_id, text, self._client)
+            self._title_worker.finished.connect(self._on_title_generated)
+            self._title_worker.start()
+
+    def _on_title_generated(self, prompt_id: int, title: str):
+        if title:
+            database.update_prompt(prompt_id=prompt_id, title=title)
+            self._history_panel.refresh(folder_id=self._current_folder_id)
+            if self._floating:
+                self._floating.refresh()
+
+    def _on_analysis_requested(self, data: dict):
+        self._status.setText("Analyzing...")
+        dlg = AnalysisDialog(data, self)
+        if dlg.exec_() == QDialog.Accepted:
+            result = dlg.get_result()
+            if result:
+                database.update_prompt(
+                    prompt_id=data["id"],
+                    title=result["title"],
+                    optimized_text=result["optimized_text"] if result["is_optimized"] else None,
+                    is_optimized=1 if result["is_optimized"] else 0,
+                    optimization_note=result["notes"] if result["notes"] else None,
+                )
+                self._history_panel.refresh(folder_id=self._current_folder_id)
+                if self._floating:
+                    self._floating.refresh()
+                self._status.setText("Analysis saved")
+        else:
+            self._status.setText("")
+
+    def _on_prompt_deleted(self):
+        if self._floating:
+            self._floating.refresh()
+
+    def _on_folder_changed(self, folder_id):
+        self._current_folder_id = folder_id
+        self._history_panel._folder_id = folder_id
+        self._history_panel.refresh(folder_id=folder_id)
 
     def _on_history_select(self, data: dict):
-        self._result_panel.clear()
-        cat_name = data.get("category_name", "Uncategorized")
-        optimized = data.get("optimized_text", "")
-        notes = data.get("optimization_note", "")
-        self._result_panel.show_result(
-            original=data["original_text"],
-            category=cat_name,
-            optimized=optimized,
-            notes=notes if notes else "",
-            optimization_enabled=bool(optimized),
-        )
-        self._result_panel._accept_btn.setVisible(False)
-        self._result_panel._keep_btn.setVisible(False)
-        self._result_panel._save_btn.setVisible(False)
+        # Left-click on history item — text already copied to clipboard by HistoryPanel
+        self._status.setText("Copied to clipboard")
 
     def _open_settings(self):
         dlg = SettingsDialog(config, self)
         if dlg.exec_() == QDialog.Accepted:
             self._client.update_config(config.api_key, config.model)
+            set_app_font(QApplication.instance(), config.font_family)
             self._status.setText("Settings saved")
 
     def _check_first_run(self):

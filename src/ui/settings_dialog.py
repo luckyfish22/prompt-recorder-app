@@ -2,8 +2,7 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                                  QLineEdit, QPushButton, QCheckBox, QComboBox,
                                  QGroupBox, QFormLayout)
 from PyQt5.QtCore import Qt
-from src.ui.theme import COLORS, FONT_SIZE_SMALL
-from src.ui.category_manager import CategoryManager
+from src.ui.theme import COLORS, FONT_CAPTION, FONT_LIBRARY
 from src import autostart
 
 
@@ -11,9 +10,8 @@ class SettingsDialog(QDialog):
     def __init__(self, config, parent=None):
         super().__init__(parent)
         self._config = config
-        self._categories = list(config.categories)
         self.setWindowTitle("Settings")
-        self.setMinimumSize(480, 420)
+        self.setMinimumSize(480, 360)
         self.setStyleSheet(f"QDialog {{ background-color: {COLORS['bg']}; }}")
         self._init_ui()
         self._load_config()
@@ -24,7 +22,7 @@ class SettingsDialog(QDialog):
         layout.setSpacing(20)
 
         title = QLabel("Settings")
-        title.setStyleSheet(f"font-size: 18px; color: {COLORS['text_primary']}; font-weight: bold;")
+        title.setStyleSheet(f"font-size: 20px; color: {COLORS['text_primary']}; font-weight: bold;")
         layout.addWidget(title)
 
         # API Key group
@@ -41,7 +39,13 @@ class SettingsDialog(QDialog):
 
         self._show_key_btn = QPushButton("Show")
         self._show_key_btn.setProperty("secondary", True)
-        self._show_key_btn.setFixedWidth(60)
+        self._show_key_btn.setCursor(Qt.PointingHandCursor)
+        self._show_key_btn.setStyleSheet(f"""
+            QPushButton {{
+                padding: 4px 12px;
+                font-size: {FONT_CAPTION}px;
+            }}
+        """)
         self._show_key_btn.clicked.connect(self._toggle_key_visibility)
         api_form.addRow("", self._show_key_btn)
 
@@ -51,7 +55,7 @@ class SettingsDialog(QDialog):
         model_layout = QHBoxLayout()
         model_layout.setSpacing(12)
         model_label = QLabel("Model:")
-        model_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px;")
+        model_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: {FONT_CAPTION}px;")
         model_layout.addWidget(model_label)
 
         self._model_combo = QComboBox()
@@ -60,30 +64,28 @@ class SettingsDialog(QDialog):
         model_layout.addWidget(self._model_combo, stretch=1)
         layout.addLayout(model_layout)
 
+        # Font selector
+        font_layout = QHBoxLayout()
+        font_layout.setSpacing(12)
+        font_label = QLabel("Font:")
+        font_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: {FONT_CAPTION}px;")
+        font_layout.addWidget(font_label)
+
+        self._font_combo = QComboBox()
+        self._font_combo.addItems(FONT_LIBRARY)
+        self._font_combo.setCursor(Qt.PointingHandCursor)
+        font_layout.addWidget(self._font_combo, stretch=1)
+        layout.addLayout(font_layout)
+
         # Optimization toggle
         self._optimization_check = QCheckBox("Enable optimization suggestions")
         self._optimization_check.setCursor(Qt.PointingHandCursor)
-        self._optimization_check.setToolTip("When disabled, only classification is performed without optimization.")
         layout.addWidget(self._optimization_check)
 
         self._autostart_check = QCheckBox("Auto-start with Windows")
         self._autostart_check.setCursor(Qt.PointingHandCursor)
         self._autostart_check.setToolTip("Launch to system tray when Windows starts.")
         layout.addWidget(self._autostart_check)
-
-        # Category management
-        cat_layout = QHBoxLayout()
-        cat_label = QLabel("Custom categories:")
-        cat_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px;")
-        cat_layout.addWidget(cat_label)
-
-        self._manage_cat_btn = QPushButton("Manage categories...")
-        self._manage_cat_btn.setProperty("secondary", True)
-        self._manage_cat_btn.setCursor(Qt.PointingHandCursor)
-        self._manage_cat_btn.clicked.connect(self._open_category_manager)
-        cat_layout.addWidget(self._manage_cat_btn)
-        cat_layout.addStretch()
-        layout.addLayout(cat_layout)
 
         layout.addStretch()
 
@@ -111,7 +113,7 @@ class SettingsDialog(QDialog):
                 border-radius: 6px;
                 margin-top: 10px;
                 padding-top: 20px;
-                font-size: 14px;
+                font-size: 16px;
                 color: {COLORS['text_primary']};
             }}
             QGroupBox::title {{
@@ -119,6 +121,7 @@ class SettingsDialog(QDialog):
                 left: 16px;
                 padding: 0 6px;
                 color: {COLORS['text_secondary']};
+                font-size: 16px;
             }}
         """
 
@@ -129,6 +132,10 @@ class SettingsDialog(QDialog):
             self._model_combo.setCurrentIndex(idx)
         self._optimization_check.setChecked(self._config.enable_optimization)
         self._autostart_check.setChecked(self._config.enable_autostart)
+        font = self._config.font_family
+        idx = self._font_combo.findText(font)
+        if idx >= 0:
+            self._font_combo.setCurrentIndex(idx)
 
     def _toggle_key_visibility(self):
         if self._api_key_input.echoMode() == QLineEdit.Password:
@@ -138,17 +145,12 @@ class SettingsDialog(QDialog):
             self._api_key_input.setEchoMode(QLineEdit.Password)
             self._show_key_btn.setText("Show")
 
-    def _open_category_manager(self):
-        dlg = CategoryManager(self._categories, self)
-        if dlg.exec_() == QDialog.Accepted:
-            self._categories = dlg.get_categories()
-
     def _save(self):
         self._config.set("api_key", self._api_key_input.text().strip())
         self._config.set("model", self._model_combo.currentText())
         self._config.set("enable_optimization", self._optimization_check.isChecked())
+        self._config.set("font_family", self._font_combo.currentText())
         enable_autostart = self._autostart_check.isChecked()
         self._config.set("enable_autostart", enable_autostart)
-        self._config.set("categories", self._categories)
         autostart.set_autostart(enable_autostart)
         self.accept()

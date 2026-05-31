@@ -1,9 +1,12 @@
 import sys
+import os
 from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
 from PyQt5.QtCore import Qt
 from src.ui.floating_window import FloatingWindow
 from src.ui.main_window import MainWindow
+from src.ui.theme import set_app_font
+from src.config_loader import config
 
 
 def _create_tray_icon():
@@ -29,6 +32,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Prompt Recorder")
     app.setQuitOnLastWindowClosed(False)
+    set_app_font(app, config.font_family)
 
     tray = QSystemTrayIcon()
     tray.setIcon(_create_tray_icon())
@@ -43,12 +47,20 @@ def main():
             border-radius: 4px;
             padding: 4px 0px;
             color: #1A1A1A;
-            font-size: 14px;
+            font-size: 18px;
         }
         QMenu::item { padding: 6px 24px; }
         QMenu::item:selected { background-color: #F5F2EF; }
     """)
+    def _restart():
+        window.hide()
+        floating.hide()
+        tray.hide()
+        os.execl(sys.executable, sys.executable, *sys.argv)
+
     open_action = tray_menu.addAction("Open Main Window")
+    restart_action = tray_menu.addAction("Restart")
+    restart_action.triggered.connect(_restart)
     tray_menu.addSeparator()
     quit_action = tray_menu.addAction("Exit")
     tray.setContextMenu(tray_menu)

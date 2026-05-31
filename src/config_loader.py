@@ -8,7 +8,7 @@ DEFAULT_CONFIG = {
     "model": "deepseek-chat",
     "enable_optimization": True,
     "enable_autostart": False,
-    "categories": ["编程", "写作", "翻译", "分析", "创意"],
+    "categories": ["Coding", "Writing", "Translation", "Analysis", "Creative"],
 }
 
 

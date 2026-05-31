@@ -21,12 +21,12 @@ class HistoryPanel(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
-        header = QLabel("历史记录")
+        header = QLabel("History")
         header.setStyleSheet(f"font-size: {FONT_SIZE_SMALL + 2}px; color: {COLORS['text_secondary']}; font-weight: bold;")
         layout.addWidget(header)
 
         self._search = QLineEdit()
-        self._search.setPlaceholderText("搜索...")
+        self._search.setPlaceholderText("Search...")
         self._search.textChanged.connect(self._on_search)
         layout.addWidget(self._search)
 
@@ -129,7 +129,7 @@ class HistoryPanel(QWidget):
             }}
         """)
 
-        delete_action = menu.addAction("删除")
+        delete_action = menu.addAction("Delete")
         delete_action.triggered.connect(lambda: self._delete_prompt(data))
 
         menu.exec_(QCursor.pos())

@@ -48,9 +48,9 @@ def main():
         QMenu::item { padding: 6px 24px; }
         QMenu::item:selected { background-color: #F5F2EF; }
     """)
-    open_action = tray_menu.addAction("打开主窗口")
+    open_action = tray_menu.addAction("Open Main Window")
     tray_menu.addSeparator()
-    quit_action = tray_menu.addAction("退出")
+    quit_action = tray_menu.addAction("Exit")
     tray.setContextMenu(tray_menu)
 
     # Create windows

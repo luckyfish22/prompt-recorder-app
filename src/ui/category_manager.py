@@ -9,7 +9,7 @@ class CategoryManager(QDialog):
     def __init__(self, categories: list, parent=None):
         super().__init__(parent)
         self._categories = list(categories)
-        self.setWindowTitle("管理分类")
+        self.setWindowTitle("Manage Categories")
         self.setMinimumSize(400, 350)
         self.setStyleSheet(f"QDialog {{ background-color: {COLORS['bg']}; }}")
         self._init_ui()
@@ -20,11 +20,11 @@ class CategoryManager(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
 
-        header = QLabel("自定义分类")
+        header = QLabel("Custom Categories")
         header.setStyleSheet(f"font-size: {FONT_SIZE_SMALL + 2}px; color: {COLORS['text_secondary']}; font-weight: bold;")
         layout.addWidget(header)
 
-        desc = QLabel("添加你常用的分类。AI 分类时会优先从这些分类中选择。")
+        desc = QLabel("Add your common categories. AI will prioritize these when classifying.")
         desc.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: {FONT_SIZE_SMALL}px;")
         desc.setWordWrap(True)
         layout.addWidget(desc)
@@ -35,17 +35,17 @@ class CategoryManager(QDialog):
         add_layout = QHBoxLayout()
         add_layout.setSpacing(8)
         self._input = QLineEdit()
-        self._input.setPlaceholderText("输入新分类名称...")
+        self._input.setPlaceholderText("Enter new category name...")
         self._input.returnPressed.connect(self._add)
         add_layout.addWidget(self._input)
 
-        add_btn = QPushButton("添加")
+        add_btn = QPushButton("Add")
         add_btn.setCursor(Qt.PointingHandCursor)
         add_btn.clicked.connect(self._add)
         add_layout.addWidget(add_btn)
         layout.addLayout(add_layout)
 
-        del_btn = QPushButton("删除选中")
+        del_btn = QPushButton("Delete Selected")
         del_btn.setProperty("secondary", True)
         del_btn.setCursor(Qt.PointingHandCursor)
         del_btn.clicked.connect(self._delete)
@@ -56,13 +56,13 @@ class CategoryManager(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        cancel_btn = QPushButton("取消")
+        cancel_btn = QPushButton("Cancel")
         cancel_btn.setProperty("secondary", True)
         cancel_btn.setCursor(Qt.PointingHandCursor)
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
 
-        done_btn = QPushButton("完成")
+        done_btn = QPushButton("Done")
         done_btn.setCursor(Qt.PointingHandCursor)
         done_btn.clicked.connect(self.accept)
         btn_layout.addWidget(done_btn)
@@ -80,7 +80,7 @@ class CategoryManager(QDialog):
         if not name:
             return
         if name in self._categories:
-            QMessageBox.warning(self, "重复", f"分类「{name}」已存在。")
+            QMessageBox.warning(self, "Duplicate", f"Category \"{name}\" already exists.")
             return
         self._categories.append(name)
         self._input.clear()

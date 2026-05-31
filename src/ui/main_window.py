@@ -32,7 +32,7 @@ class AnalysisWorker(QThread):
             optimized = ""
             notes = ""
             if self._enable_optimization:
-                self.progress.emit("正在优化...")
+                self.progress.emit("Optimizing...")
                 optimizer = Optimizer(self._client)
                 optimized, notes = optimizer.optimize(self._prompt)
 
@@ -82,7 +82,7 @@ class MainWindow(QMainWindow):
         title = QLabel("Prompt Recorder")
         title.setStyleSheet(f"font-size: 16px; color: {COLORS['text_primary']}; font-weight: bold; border: none;")
 
-        self._settings_btn = QPushButton("设置")
+        self._settings_btn = QPushButton("Settings")
         self._settings_btn.setProperty("secondary", True)
         self._settings_btn.setCursor(Qt.PointingHandCursor)
         self._settings_btn.clicked.connect(self._open_settings)
@@ -124,7 +124,7 @@ class MainWindow(QMainWindow):
     def _on_analyze(self, text: str):
         self._current_prompt = text
         self._result_panel.clear()
-        self._status.setText("正在分析...")
+        self._status.setText("Analyzing...")
 
         self._client.update_config(config.api_key, config.model)
 
@@ -139,8 +139,8 @@ class MainWindow(QMainWindow):
 
         if "error" in result:
             self._result_panel.clear()
-            self._status.setText(f"错误: {result['error']}")
-            QMessageBox.warning(self, "分析失败", f"API 调用出错:\n{result['error']}")
+            self._status.setText(f"Error: {result['error']}")
+            QMessageBox.warning(self, "Analysis Failed", f"API call failed:\n{result['error']}")
             return
 
         self._current_title = result.get("title", "")
@@ -155,15 +155,15 @@ class MainWindow(QMainWindow):
             notes=self._current_notes,
             optimization_enabled=config.enable_optimization,
         )
-        self._status.setText("分析完成")
+        self._status.setText("Analysis complete")
 
     def _on_accept(self):
         self._save_prompt(is_optimized=1)
-        self._status.setText("已保存（采用优化版）")
+        self._status.setText("Saved (optimized)")
 
     def _on_keep(self):
         self._save_prompt(is_optimized=0)
-        self._status.setText("已保存（保留原文）")
+        self._status.setText("Saved (original)")
 
     def _save_prompt(self, is_optimized: int):
         cat_id = self._ensure_category(self._current_category)
@@ -194,7 +194,7 @@ class MainWindow(QMainWindow):
 
     def _on_history_select(self, data: dict):
         self._result_panel.clear()
-        cat_name = data.get("category_name", "未分类")
+        cat_name = data.get("category_name", "Uncategorized")
         optimized = data.get("optimized_text", "")
         notes = data.get("optimization_note", "")
         self._result_panel.show_result(
@@ -212,14 +212,14 @@ class MainWindow(QMainWindow):
         dlg = SettingsDialog(config, self)
         if dlg.exec_() == QDialog.Accepted:
             self._client.update_config(config.api_key, config.model)
-            self._status.setText("设置已保存")
+            self._status.setText("Settings saved")
 
     def _check_first_run(self):
         if not config.api_key:
             QMessageBox.information(
-                self, "欢迎使用",
-                "首次使用请先配置 DeepSeek API Key。\n\n"
-                "点击确定后进入设置页面。"
+                self, "Welcome",
+                "Please configure your DeepSeek API Key first.\n\n"
+                "Click OK to open settings."
             )
             self._open_settings()
 

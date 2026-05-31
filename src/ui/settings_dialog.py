@@ -12,7 +12,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self._config = config
         self._categories = list(config.categories)
-        self.setWindowTitle("设置")
+        self.setWindowTitle("Settings")
         self.setMinimumSize(480, 420)
         self.setStyleSheet(f"QDialog {{ background-color: {COLORS['bg']}; }}")
         self._init_ui()
@@ -23,7 +23,7 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(20)
 
-        title = QLabel("设置")
+        title = QLabel("Settings")
         title.setStyleSheet(f"font-size: 18px; color: {COLORS['text_primary']}; font-weight: bold;")
         layout.addWidget(title)
 
@@ -39,7 +39,7 @@ class SettingsDialog(QDialog):
         self._api_key_input.setPlaceholderText("sk-...")
         api_form.addRow("API Key:", self._api_key_input)
 
-        self._show_key_btn = QPushButton("显示")
+        self._show_key_btn = QPushButton("Show")
         self._show_key_btn.setProperty("secondary", True)
         self._show_key_btn.setFixedWidth(60)
         self._show_key_btn.clicked.connect(self._toggle_key_visibility)
@@ -50,7 +50,7 @@ class SettingsDialog(QDialog):
         # Model
         model_layout = QHBoxLayout()
         model_layout.setSpacing(12)
-        model_label = QLabel("模型:")
+        model_label = QLabel("Model:")
         model_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px;")
         model_layout.addWidget(model_label)
 
@@ -61,23 +61,23 @@ class SettingsDialog(QDialog):
         layout.addLayout(model_layout)
 
         # Optimization toggle
-        self._optimization_check = QCheckBox("启用优化建议")
+        self._optimization_check = QCheckBox("Enable optimization suggestions")
         self._optimization_check.setCursor(Qt.PointingHandCursor)
-        self._optimization_check.setToolTip("关闭后，分析时仅进行分类，不对提示词进行优化")
+        self._optimization_check.setToolTip("When disabled, only classification is performed without optimization.")
         layout.addWidget(self._optimization_check)
 
-        self._autostart_check = QCheckBox("开机自动启动")
+        self._autostart_check = QCheckBox("Auto-start with Windows")
         self._autostart_check.setCursor(Qt.PointingHandCursor)
-        self._autostart_check.setToolTip("Windows 启动时自动运行程序到系统托盘")
+        self._autostart_check.setToolTip("Launch to system tray when Windows starts.")
         layout.addWidget(self._autostart_check)
 
         # Category management
         cat_layout = QHBoxLayout()
-        cat_label = QLabel("自定义分类:")
+        cat_label = QLabel("Custom categories:")
         cat_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px;")
         cat_layout.addWidget(cat_label)
 
-        self._manage_cat_btn = QPushButton("管理分类...")
+        self._manage_cat_btn = QPushButton("Manage categories...")
         self._manage_cat_btn.setProperty("secondary", True)
         self._manage_cat_btn.setCursor(Qt.PointingHandCursor)
         self._manage_cat_btn.clicked.connect(self._open_category_manager)
@@ -91,13 +91,13 @@ class SettingsDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        cancel_btn = QPushButton("取消")
+        cancel_btn = QPushButton("Cancel")
         cancel_btn.setProperty("secondary", True)
         cancel_btn.setCursor(Qt.PointingHandCursor)
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
 
-        save_btn = QPushButton("保存")
+        save_btn = QPushButton("Save")
         save_btn.setCursor(Qt.PointingHandCursor)
         save_btn.clicked.connect(self._save)
         btn_layout.addWidget(save_btn)
@@ -133,10 +133,10 @@ class SettingsDialog(QDialog):
     def _toggle_key_visibility(self):
         if self._api_key_input.echoMode() == QLineEdit.Password:
             self._api_key_input.setEchoMode(QLineEdit.Normal)
-            self._show_key_btn.setText("隐藏")
+            self._show_key_btn.setText("Hide")
         else:
             self._api_key_input.setEchoMode(QLineEdit.Password)
-            self._show_key_btn.setText("显示")
+            self._show_key_btn.setText("Show")
 
     def _open_category_manager(self):
         dlg = CategoryManager(self._categories, self)

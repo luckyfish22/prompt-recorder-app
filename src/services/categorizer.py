@@ -29,7 +29,7 @@ class Categorizer:
         if not title:
             title = prompt_text[:40].replace("\n", " ").strip()
         if not category:
-            category = "其他"
+            category = "Other"
         return title, category
 
     def _parse(self, response: str) -> tuple[str, str]:

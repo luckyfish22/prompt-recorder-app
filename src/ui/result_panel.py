@@ -18,7 +18,7 @@ class ResultPanel(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
-        header = QLabel("分析结果")
+        header = QLabel("Analysis Result")
         header.setStyleSheet(f"font-size: {FONT_SIZE_SMALL + 2}px; color: {COLORS['text_secondary']}; font-weight: bold;")
         layout.addWidget(header)
 
@@ -40,7 +40,7 @@ class ResultPanel(QWidget):
         self._category_label.setVisible(False)
         self._content_layout.addWidget(self._category_label)
 
-        self._original_label = QLabel("原文")
+        self._original_label = QLabel("Original")
         self._original_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: {FONT_SIZE_SMALL}px;")
         self._original_label.setVisible(False)
         self._content_layout.addWidget(self._original_label)
@@ -51,7 +51,7 @@ class ResultPanel(QWidget):
         self._original_text.setVisible(False)
         self._content_layout.addWidget(self._original_text)
 
-        self._optimized_label = QLabel("优化版")
+        self._optimized_label = QLabel("Optimized")
         self._optimized_label.setStyleSheet(f"color: {COLORS['primary']}; font-size: {FONT_SIZE_SMALL}px; font-weight: bold;")
         self._optimized_label.setVisible(False)
         self._content_layout.addWidget(self._optimized_label)
@@ -78,20 +78,20 @@ class ResultPanel(QWidget):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(12)
 
-        self._accept_btn = QPushButton("采用优化")
+        self._accept_btn = QPushButton("Accept Optimized")
         self._accept_btn.setCursor(Qt.PointingHandCursor)
         self._accept_btn.clicked.connect(lambda: self.accept_clicked.emit())
         self._accept_btn.setVisible(False)
         btn_layout.addWidget(self._accept_btn)
 
-        self._keep_btn = QPushButton("保留原文")
+        self._keep_btn = QPushButton("Keep Original")
         self._keep_btn.setProperty("secondary", True)
         self._keep_btn.setCursor(Qt.PointingHandCursor)
         self._keep_btn.clicked.connect(lambda: self.keep_clicked.emit())
         self._keep_btn.setVisible(False)
         btn_layout.addWidget(self._keep_btn)
 
-        self._save_btn = QPushButton("保存")
+        self._save_btn = QPushButton("Save")
         self._save_btn.setCursor(Qt.PointingHandCursor)
         self._save_btn.clicked.connect(lambda: self.keep_clicked.emit())
         self._save_btn.setVisible(False)

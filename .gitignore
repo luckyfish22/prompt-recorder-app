@@ -26,5 +26,8 @@ Desktop.ini
 # Config (contains API key)
 config.json
 
+# Database (user data)
+*.db
+
 # Logs
 *.log

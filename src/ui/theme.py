@@ -22,6 +22,8 @@ FONT_MICRO   = 15  # 微小文字：历史记录时间戳
 FONT_FLOAT   = 17  # 悬浮窗：下拉框、翻译输入框
 FONT_TITLE   = 28  # 主标题：顶部 "Prompt Recorder"
 
+MAX_TITLE_LENGTH = 20  # 提示词标题最大字符数
+
 FONT_LIBRARY = [
     "Microsoft YaHei",
     "Segoe UI",

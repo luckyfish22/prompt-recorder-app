@@ -153,15 +153,9 @@ class FolderBar(QWidget):
         self._scroll_layout.setContentsMargins(4, 0, 4, 0)
         self._scroll_layout.setSpacing(2)
 
-        # "All" tab
-        all_tab = self._make_tab(None)
-        self._scroll_layout.addWidget(all_tab)
-        self._tabs.append(all_tab)
-
-        # Custom folder tabs
+        # All tabs + folder tabs + stretch are built by _rebuild_tabs()
         self._rebuild_tabs()
 
-        self._scroll_layout.addStretch()
         self._scroll.setWidget(self._scroll_content)
         layout.addWidget(self._scroll, stretch=1)
 
@@ -197,18 +191,45 @@ class FolderBar(QWidget):
         return tab
 
     def _rebuild_tabs(self):
-        # Remove all tabs except "All" (index 0)
-        while self._scroll_layout.count() > 2:  # 0=All, 1=stretch
-            item = self._scroll_layout.takeAt(1)
+        # Remember current selection to restore after rebuild
+        prev_folder_id = None
+        if self._current and isinstance(self._current, dict):
+            prev_folder_id = self._current.get("id")
+
+        # Clear all layout items (widgets + stretch)
+        while self._scroll_layout.count():
+            item = self._scroll_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        self._tabs = [self._tabs[0]]  # keep All
 
+        self._tabs = []
+
+        # "All" tab (always first)
+        all_tab = self._make_tab(None)
+        self._scroll_layout.addWidget(all_tab)
+        self._tabs.append(all_tab)
+
+        # Custom folder tabs
         folders = database.get_all_folders()
         for f in folders:
             tab = self._make_tab(f)
-            self._scroll_layout.insertWidget(self._scroll_layout.count() - 1, tab)
+            self._scroll_layout.addWidget(tab)
             self._tabs.append(tab)
+
+        # Stretch at the end
+        self._scroll_layout.addStretch()
+
+        # Restore previous selection
+        if prev_folder_id is not None:
+            for tab in self._tabs:
+                if tab.folder and tab.folder.get("id") == prev_folder_id:
+                    self._select(tab.folder)
+                    return
+            # Previously selected folder was deleted → select All
+            self._select(None)
+        elif self._current is None:
+            # Was on "All" → stay on All
+            self._select(None)
 
     def _on_tab_clicked(self, folder):
         self._select(folder)
@@ -218,7 +239,13 @@ class FolderBar(QWidget):
     def _select(self, folder):
         self._current = folder
         for tab in self._tabs:
-            tab.set_selected(tab.folder is folder)
+            if folder is None:
+                tab.set_selected(tab.folder is None)
+            else:
+                tab.set_selected(
+                    tab.folder is not None
+                    and tab.folder.get("id") == folder.get("id")
+                )
 
     def _select_all(self):
         self._select(None)
@@ -243,24 +270,52 @@ class FolderBar(QWidget):
         btn_box.rejected.connect(dlg.reject)
         layout.addWidget(btn_box)
         if dlg.exec_() == QDialog.Accepted and edit.text().strip():
-            database.add_folder(edit.text().strip())
+            new_id = database.add_folder(edit.text().strip())
             self._rebuild_tabs()
+            # Select the newly created folder
+            for tab in self._tabs:
+                if tab.folder and tab.folder.get("id") == new_id:
+                    self._select(tab.folder)
+                    self.folder_changed.emit(new_id)
+                    break
 
     def _on_rename(self, folder, new_name):
         database.rename_folder(folder["id"], new_name)
         self._rebuild_tabs()
+        # After rebuild, selection is already restored by _rebuild_tabs
+        # Re-emit to refresh history panel (folder name may have changed metadata)
+        if self._current and isinstance(self._current, dict):
+            self.folder_changed.emit(self._current.get("id"))
+        else:
+            self.folder_changed.emit(None)
 
     def _on_delete(self, folder):
-        reply = QMessageBox.question(
-            self, "Delete Folder",
-            f'Delete "{folder["name"]}"?\nPrompts in this folder will return to "All".',
-            QMessageBox.Yes | QMessageBox.No)
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Delete Folder")
+        msg.setText(f'Delete "{folder["name"]}"?\nPrompts in this folder will return to "All".')
+        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg.setDefaultButton(QMessageBox.No)
+        msg.setStyleSheet(f"""
+            QMessageBox {{ background-color: {COLORS['bg']}; }}
+            QLabel {{ color: {COLORS['text_primary']}; font-size: {FONT_CAPTION}px; }}
+            QPushButton {{
+                background-color: {COLORS['primary']};
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 24px;
+                font-size: {FONT_CAPTION}px;
+                min-width: 80px;
+            }}
+            QPushButton:hover {{ background-color: {COLORS['primary_hover']}; }}
+        """)
+        reply = msg.exec_()
         if reply == QMessageBox.Yes:
             database.delete_folder(folder["id"])
-            if self._current and self._current["id"] == folder["id"]:
-                self._select_all()
             self._rebuild_tabs()
-            self.folder_changed.emit(None)
+            # _rebuild_tabs restores selection (or switches to All if deleted folder was current)
+            folder_id = self._current.get("id") if self._current and isinstance(self._current, dict) else None
+            self.folder_changed.emit(folder_id)
 
     def _on_drop(self, folder):
         # Re-select current folder to refresh history

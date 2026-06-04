@@ -6,7 +6,7 @@ from PyQt5.QtGui import QCloseEvent, QPainter, QFont, QPen, QColor, QFontMetrics
 from src.config_loader import config
 from src.api.deepseek_client import DeepSeekClient
 from src.db import database
-from src.ui.theme import STYLESHEET, COLORS, FONT_CAPTION, FONT_TITLE, set_app_font
+from src.ui.theme import STYLESHEET, COLORS, FONT_CAPTION, FONT_TITLE, MAX_TITLE_LENGTH, set_app_font
 from src.ui.input_panel import InputPanel
 from src.ui.history_panel import HistoryPanel
 from src.ui.folder_bar import FolderBar
@@ -34,7 +34,7 @@ class _TitleWorker(QThread):
     def run(self):
         try:
             title = self._client.chat(TITLE_SYSTEM_PROMPT, self._prompt_text, temperature=0.3)
-            title = title.strip().replace("\n", " ")[:30]
+            title = title.strip().replace("\n", " ")[:MAX_TITLE_LENGTH]
             self.finished.emit(self._prompt_id, title)
         except Exception:
             pass  # Keep the temp title on failure
@@ -162,7 +162,7 @@ class MainWindow(QMainWindow):
             self._floating.refresh()
 
     def _on_save_prompt(self, text: str):
-        title = text.replace("\n", " ")[:30]
+        title = text.replace("\n", " ")[:MAX_TITLE_LENGTH]
         prompt_id = database.save_prompt(
             title=title,
             original_text=text,
@@ -228,11 +228,25 @@ class MainWindow(QMainWindow):
 
     def _check_first_run(self):
         if not config.api_key:
-            QMessageBox.information(
-                self, "Welcome",
-                "Please configure your DeepSeek API Key first.\n\n"
-                "Click OK to open settings."
-            )
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Welcome")
+            msg.setText("Please configure your DeepSeek API Key first.\n\nClick OK to open settings.")
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.setStyleSheet(f"""
+                QMessageBox {{ background-color: {COLORS['bg']}; }}
+                QLabel {{ color: {COLORS['text_primary']}; font-size: {FONT_CAPTION}px; }}
+                QPushButton {{
+                    background-color: {COLORS['primary']};
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px 24px;
+                    font-size: {FONT_CAPTION}px;
+                    min-width: 80px;
+                }}
+                QPushButton:hover {{ background-color: {COLORS['primary_hover']}; }}
+            """)
+            msg.exec_()
             self._open_settings()
 
     def closeEvent(self, event: QCloseEvent):

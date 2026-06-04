@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QComboBox, QPushButton,
                                  QApplication, QSizePolicy, QMenu, QLineEdit,
-                                 QLabel, QFrame, QVBoxLayout)
+                                 QLabel, QFrame, QVBoxLayout, QWidgetAction)
 from PyQt5.QtCore import Qt, pyqtSignal, QEvent, QTimer, QThread, QPoint
 import math
 from PyQt5.QtGui import QMouseEvent, QCursor, QPainter, QPen, QColor, QPainterPath
@@ -13,6 +13,57 @@ TRANSLATION_PROMPT = """You are a Chinese-English translator.
 - If the input is Chinese, translate to natural English.
 - If the input is English, translate to natural Chinese.
 - Return ONLY the translation, no explanations, no quotes, no prefixes."""
+
+COMMAND_EXPLAIN_PROMPT = """You are a technical assistant. Explain the given CLI command, Python function/class/module, or programming keyword.
+
+- Explain its **name origin** (etymology, abbreviation, naming background)
+- Briefly describe **what it does**
+- Respond in Chinese
+- Keep it concise
+
+Format:
+名称来源：…
+功能：…
+
+Return ONLY the final answer, no prefixes or meta-commentary."""
+
+def _make_translate_icon(size=28):
+    """Draw a translate icon: two overlapping rounded rects."""
+    from PyQt5.QtGui import QPixmap, QIcon
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    painter = QPainter(pix)
+    painter.setRenderHint(QPainter.Antialiasing)
+    m = 2
+    w = size - 2 * m
+    half = w * 3 // 4
+    off = w // 4
+    # Left block
+    painter.setBrush(QColor(COLORS["primary"]))
+    painter.setPen(Qt.NoPen)
+    painter.drawRoundedRect(m, m + off, half, half, 4, 4)
+    # Right block (slightly offset)
+    c2 = QColor(COLORS["primary"])
+    c2.setAlpha(160)
+    painter.setBrush(c2)
+    painter.drawRoundedRect(m + off, m, half, half, 4, 4)
+    painter.end()
+    return QIcon(pix)
+
+def _make_command_icon(size=28):
+    """Draw a command-line icon: >_ symbol."""
+    from PyQt5.QtGui import QPixmap, QIcon, QFont
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    painter = QPainter(pix)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setPen(QColor(COLORS["primary"]))
+    font = QFont("Consolas", 16)
+    font.setBold(True)
+    painter.setFont(font)
+    painter.drawText(pix.rect(), Qt.AlignCenter, ">_")
+    painter.end()
+    return QIcon(pix)
 
 
 
@@ -48,14 +99,15 @@ class _ModeToggle(QPushButton):
 class _TranslationWorker(QThread):
     finished = pyqtSignal(str)
 
-    def __init__(self, text: str, client: DeepSeekClient):
+    def __init__(self, text: str, client: DeepSeekClient, system_prompt: str = TRANSLATION_PROMPT):
         super().__init__()
         self._text = text
         self._client = client
+        self._system_prompt = system_prompt
 
     def run(self):
         try:
-            result = self._client.chat(TRANSLATION_PROMPT, self._text, temperature=0.3)
+            result = self._client.chat(self._system_prompt, self._text, temperature=0.3)
             self.finished.emit(result.strip())
         except Exception:
             pass
@@ -68,11 +120,17 @@ class FloatingWindow(QWidget):
     def __init__(self):
         super().__init__(flags=Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self._drag_pos = None
-        self._translation_mode = False
+        self._query_mode = None  # None, "translate", "explain"
         self._trans_timer = QTimer(self)
         self._trans_timer.setSingleShot(True)
         self._trans_timer.timeout.connect(self._do_translate)
+        self._cmd_timer = QTimer(self)
+        self._cmd_timer.setSingleShot(True)
+        self._cmd_timer.timeout.connect(self._do_explain)
         self._trans_worker = None
+        # Pre-init to avoid AttributeError in eventFilter during _init_ui
+        self._trans_input = None
+        self._cmd_input = None
         self._client = DeepSeekClient(config.api_key, config.model)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
@@ -98,7 +156,7 @@ class FloatingWindow(QWidget):
 
         # Mode toggle button — square with diagonal slash
         self._mode_btn = _ModeToggle()
-        self._mode_btn.setToolTip("Switch to translation mode")
+        self._mode_btn.setToolTip("<span style='font-size:18px'>Query: translate / explain commands</span>")
         self._mode_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
@@ -110,18 +168,17 @@ class FloatingWindow(QWidget):
                 background-color: {COLORS['accent_bg']};
             }}
         """)
-        self._mode_btn.clicked.connect(self._toggle_mode)
+        self._mode_btn.clicked.connect(self._show_mode_menu)
         layout.addWidget(self._mode_btn)
 
         # Translation input (hidden in normal mode)
         self._trans_input = QLineEdit()
-        self._trans_input.setPlaceholderText("Type to translate...")
+        self._trans_input.setPlaceholderText("Type to translate…")
         self._trans_input.setStyleSheet(f"""
             QLineEdit {{
                 background-color: transparent;
                 border: none;
                 color: {COLORS['text_primary']};
-                
                 font-size: {FONT_FLOAT}px;
                 padding: 2px 4px;
             }}
@@ -134,8 +191,33 @@ class FloatingWindow(QWidget):
         self._trans_input.setContextMenuPolicy(Qt.CustomContextMenu)
         self._trans_input.customContextMenuRequested.connect(self._on_trans_context_menu)
         self._trans_input.textChanged.connect(self._on_trans_text_changed)
+        self._trans_input.installEventFilter(self)
         self._trans_input.hide()
         layout.addWidget(self._trans_input, stretch=1)
+
+        # Command/function explain input (hidden in normal mode)
+        self._cmd_input = QLineEdit()
+        self._cmd_input.setPlaceholderText("Type a command or function name to explain…")
+        self._cmd_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: transparent;
+                border: none;
+                color: {COLORS['text_primary']};
+                font-size: {FONT_FLOAT}px;
+                padding: 2px 4px;
+            }}
+            QLineEdit:focus {{
+                border: none;
+                background-color: {COLORS['accent_bg']};
+                border-radius: 4px;
+            }}
+        """)
+        self._cmd_input.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._cmd_input.customContextMenuRequested.connect(self._on_trans_context_menu)
+        self._cmd_input.textChanged.connect(self._on_cmd_text_changed)
+        self._cmd_input.installEventFilter(self)
+        self._cmd_input.hide()
+        layout.addWidget(self._cmd_input, stretch=1)
 
         # Translation result popup (dropdown below input)
         self._trans_popup = QFrame()
@@ -478,7 +560,7 @@ class FloatingWindow(QWidget):
 
     def moveEvent(self, event):
         super().moveEvent(event)
-        if self._translation_mode:
+        if self._query_mode is not None:
             self._trans_popup.hide()
 
     def show_and_position(self):
@@ -488,26 +570,91 @@ class FloatingWindow(QWidget):
         self.move(x, y)
         self.show()
 
-    # --- Translation mode ---
+    # --- Query modes (translate / explain) ---
 
-    def _toggle_mode(self):
-        self._translation_mode = not self._translation_mode
-        self._mode_btn.set_active(self._translation_mode)
-        if self._translation_mode:
-            self._mode_btn.setToolTip("Exit translation mode")
-            self._combo.hide()
+    def _show_mode_menu(self):
+        """Show dropdown menu, or exit to normal mode if already in a query mode."""
+        if self._query_mode is not None:
+            self._exit_query_mode()
+            return
+
+        menu = QMenu(self)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 6px;
+                padding: 4px;
+            }}
+        """)
+
+        icon_size = 24
+
+        is_translate = self._query_mode == "translate"
+        is_explain = self._query_mode == "explain"
+
+        def _make_icon_action(menu, icon_func, active):
+            pix = icon_func(icon_size).pixmap(icon_size, icon_size)
+            w = QWidget()
+            w.setFixedSize(icon_size + 14, icon_size + 12)
+            if active:
+                w.setStyleSheet(f"background: {COLORS['accent_bg']}; border-radius: 4px;")
+            lay = QHBoxLayout(w)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lbl = QLabel()
+            lbl.setPixmap(pix)
+            lbl.setFixedSize(icon_size, icon_size)
+            lay.addWidget(lbl, alignment=Qt.AlignCenter)
+            act = QWidgetAction(menu)
+            act.setDefaultWidget(w)
+            menu.addAction(act)
+            return act
+
+        trans_action = _make_icon_action(menu, _make_translate_icon, is_translate)
+        cmd_action = _make_icon_action(menu, _make_command_icon, is_explain)
+
+        action = menu.exec_(self._mode_btn.mapToGlobal(
+            self._mode_btn.rect().bottomLeft() + QPoint(0, 4)))
+
+        if action == trans_action:
+            if is_translate:
+                self._exit_query_mode()
+            else:
+                self._enter_mode("translate")
+        elif action == cmd_action:
+            if is_explain:
+                self._exit_query_mode()
+            else:
+                self._enter_mode("explain")
+
+    def _enter_mode(self, mode: str):
+        self._query_mode = mode
+        self._mode_btn.set_active(True)
+        self._combo.hide()
+        self._star_btn.hide()
+
+        if mode == "translate":
+            self._cmd_input.hide()
             self._trans_input.show()
             self._trans_input.setFocus()
-            self._star_btn.hide()
-            self.resize(460, 52)
-        else:
-            self._mode_btn.setToolTip("Switch to translation mode")
+        else:  # explain
             self._trans_input.hide()
-            self._trans_popup.hide()
-            self._combo.show()
-            self._star_btn.show()
-            self.resize(420, 52)
-            self._trans_input.clear()
+            self._cmd_input.show()
+            self._cmd_input.setFocus()
+
+        self.resize(460, 52)
+
+    def _exit_query_mode(self):
+        self._query_mode = None
+        self._mode_btn.set_active(False)
+        self._trans_input.hide()
+        self._cmd_input.hide()
+        self._trans_popup.hide()
+        self._trans_input.clear()
+        self._cmd_input.clear()
+        self._combo.show()
+        self._star_btn.show()
+        self.resize(420, 52)
 
     def _on_trans_text_changed(self, text: str):
         if not text.strip():
@@ -520,7 +667,22 @@ class FloatingWindow(QWidget):
         text = self._trans_input.text().strip()
         if not text or not self._client.is_configured:
             return
-        self._trans_worker = _TranslationWorker(text, self._client)
+        self._trans_worker = _TranslationWorker(text, self._client, TRANSLATION_PROMPT)
+        self._trans_worker.finished.connect(self._on_translation_result)
+        self._trans_worker.start()
+
+    def _on_cmd_text_changed(self, text: str):
+        if not text.strip():
+            self._trans_popup.hide()
+            return
+        self._cmd_timer.stop()
+        self._cmd_timer.start(500)
+
+    def _do_explain(self):
+        text = self._cmd_input.text().strip()
+        if not text or not self._client.is_configured:
+            return
+        self._trans_worker = _TranslationWorker(text, self._client, COMMAND_EXPLAIN_PROMPT)
         self._trans_worker.finished.connect(self._on_translation_result)
         self._trans_worker.start()
 
@@ -636,6 +798,14 @@ class FloatingWindow(QWidget):
             }}
         """)
         menu.addAction("Open Main Window").triggered.connect(self.show_main_requested.emit)
+        menu.addAction("Hide Window").triggered.connect(self.hide)
         menu.addSeparator()
         menu.addAction("Exit").triggered.connect(QApplication.instance().quit)
         menu.exec_(QCursor.pos())
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.MouseButtonDblClick:
+            if obj is self._trans_input or obj is self._cmd_input:
+                obj.paste()
+                return True
+        return super().eventFilter(obj, event)

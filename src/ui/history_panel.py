@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QLineEdit, QListWidget,
 from PyQt5.QtCore import pyqtSignal, Qt, QMimeData, QPoint, QItemSelectionModel, QTimer
 from PyQt5.QtGui import QCursor, QDrag, QPainter, QPen, QColor
 from src.db import database
-from src.ui.theme import COLORS, FONT_BODY, FONT_CAPTION, FONT_MICRO
+from src.ui.theme import COLORS, FONT_BODY, FONT_CAPTION, FONT_MICRO, MAX_TITLE_LENGTH
 from src.ui.folder_bar import FOLDER_MIME
 
 REORDER_MIME = "application/x-promptrecorder-reorder"
@@ -198,7 +198,9 @@ class HistoryPanel(QWidget):
         top.setSpacing(10)
         top.setContentsMargins(0, 0, 0, 0)
 
-        title_text = prompt.get("title") or prompt["original_text"].replace("\n", " ")[:30]
+        title_text = prompt.get("title") or prompt["original_text"].replace("\n", " ")[:MAX_TITLE_LENGTH]
+        if len(title_text) >= MAX_TITLE_LENGTH:
+            title_text = title_text[:MAX_TITLE_LENGTH] + "…"
         title_label = QLabel(title_text)
         title_label.setStyleSheet(
             f"color: {COLORS['text_primary']}; font-size: {FONT_BODY}px; font-weight: bold; "
@@ -313,7 +315,8 @@ class HistoryPanel(QWidget):
         layout.addWidget(title_label)
 
         title_edit = QLineEdit()
-        title_edit.setText(data.get("title") or data["original_text"].replace("\n", " ")[:30])
+        title_edit.setMaxLength(MAX_TITLE_LENGTH)
+        title_edit.setText(data.get("title") or data["original_text"].replace("\n", " ")[:MAX_TITLE_LENGTH])
         layout.addWidget(title_edit)
 
         text_label = QLabel("Prompt text:")

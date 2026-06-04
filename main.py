@@ -71,10 +71,12 @@ def main():
     floating = FloatingWindow()
     window = MainWindow(floating_window=floating)
 
-    # Tray click → left=restore, right=popup menu (auto-dismiss)
+    # Tray click → left=floating window, right=popup menu (auto-dismiss)
     def on_tray_activated(reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            window.restore()
+            floating.show()
+            floating.raise_()
+            floating.activateWindow()
         elif reason == QSystemTrayIcon.ActivationReason.Context:
             tray_menu.popup(QCursor.pos())
     tray.activated.connect(on_tray_activated)

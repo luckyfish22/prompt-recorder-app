@@ -1,5 +1,5 @@
-from PyQt5.QtWidgets import (QMainWindow, QSplitter, QHBoxLayout, QVBoxLayout,
-                                 QWidget, QPushButton, QLabel, QMessageBox, QDialog,
+from PyQt5.QtWidgets import (QMainWindow, QHBoxLayout, QVBoxLayout,
+                                 QWidget, QPushButton, QLabel, QLineEdit, QMessageBox, QDialog,
                                  QApplication)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSize
 from PyQt5.QtGui import QCloseEvent, QPainter, QFont, QPen, QColor, QFontMetrics
@@ -7,7 +7,6 @@ from src.config_loader import config
 from src.api.deepseek_client import DeepSeekClient
 from src.db import database
 from src.ui.theme import STYLESHEET, COLORS, FONT_CAPTION, FONT_TITLE, MAX_TITLE_LENGTH, set_app_font
-from src.ui.input_panel import InputPanel
 from src.ui.history_panel import HistoryPanel
 from src.ui.folder_tree import FolderTree
 from src.ui.analysis_dialog import AnalysisDialog
@@ -104,9 +103,28 @@ class MainWindow(QMainWindow):
         title_bar = QWidget()
         title_bar.setStyleSheet(f"background-color: {COLORS['surface']}; border-bottom: 1px solid {COLORS['border']};")
         title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(16, 14, 16, 14)
+        title_layout.setContentsMargins(16, 8, 16, 8)
 
         title = _TitleLabel("Prompt  Recorder", COLORS["primary"], FONT_TITLE)
+
+        # Prompt input (compact, in title bar)
+        self._prompt_input = QLineEdit()
+        self._prompt_input.setPlaceholderText("Type or paste your prompt here…")
+        self._prompt_input.setFixedHeight(28)
+        self._prompt_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {COLORS['bg']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 4px 12px;
+                color: {COLORS['text_primary']};
+                font-size: 16px;
+            }}
+            QLineEdit:focus {{
+                border-color: {COLORS['primary']};
+            }}
+        """)
+        self._prompt_input.returnPressed.connect(self._on_input_enter)
 
         self._settings_btn = QPushButton("Settings")
         self._settings_btn.setProperty("secondary", True)
@@ -114,7 +132,8 @@ class MainWindow(QMainWindow):
         self._settings_btn.clicked.connect(self._open_settings)
 
         title_layout.addWidget(title)
-        title_layout.addStretch()
+        title_layout.addWidget(self._prompt_input, stretch=1)
+        title_layout.addSpacing(12)
         title_layout.addWidget(self._settings_btn)
 
         # Folder tree sidebar
@@ -122,16 +141,8 @@ class MainWindow(QMainWindow):
         self._folder_tree.setFixedWidth(200)
         self._folder_tree.folder_changed.connect(self._on_folder_changed)
 
-        # Two-panel splitter
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setHandleWidth(1)
-
-        self._input_panel = InputPanel()
+        # History panel (now fills the entire right area)
         self._history_panel = HistoryPanel()
-
-        splitter.addWidget(self._input_panel)
-        splitter.addWidget(self._history_panel)
-        splitter.setSizes([400, 700])
 
         # Status bar
         self._status = QLabel("")
@@ -140,11 +151,11 @@ class MainWindow(QMainWindow):
             f"background: {COLORS['bg']}; border-top: 1px solid {COLORS['border']};"
         )
 
-        # Right content area
+        # Right content area: history + status
         content_layout = QVBoxLayout()
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
-        content_layout.addWidget(splitter, stretch=1)
+        content_layout.addWidget(self._history_panel, stretch=1)
         content_layout.addWidget(self._status)
 
         # Main body: sidebar + content
@@ -158,7 +169,6 @@ class MainWindow(QMainWindow):
         root_layout.addLayout(main_body, stretch=1)
 
         # Connect signals
-        self._input_panel.save_requested.connect(self._on_save_prompt)
         self._history_panel.prompt_selected.connect(self._on_history_select)
         self._history_panel.prompt_deleted.connect(self._on_prompt_deleted)
         self._history_panel.analysis_requested.connect(self._on_analysis_requested)
@@ -169,6 +179,12 @@ class MainWindow(QMainWindow):
 
     def _on_floating_folder_selected(self, folder_id):
         self._folder_tree.select_folder(folder_id)
+
+    def _on_input_enter(self):
+        text = self._prompt_input.text().strip()
+        if text:
+            self._on_save_prompt(text)
+            self._prompt_input.clear()
 
     def _on_prompt_changed(self):
         if self._floating:

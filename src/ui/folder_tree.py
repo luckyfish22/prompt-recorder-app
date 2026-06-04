@@ -4,11 +4,82 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                              QDialog, QLabel, QLineEdit, QDialogButtonBox,
                              QAbstractItemView)
 from PyQt5.QtCore import Qt, pyqtSignal, QMimeData, QTimer
-from PyQt5.QtGui import QDragEnterEvent, QDropEvent, QCursor, QFont
+from PyQt5.QtGui import QDragEnterEvent, QDropEvent, QCursor, QFont, QDrag
 from src.db import database
 from src.ui.theme import COLORS, FONT_CAPTION
 
 FOLDER_MIME = "application/x-promptrecorder-prompt-id"
+FOLDER_DRAG_MIME = "application/x-promptrecorder-folder-id"
+
+
+class _FolderTreeWidget(QTreeWidget):
+    """QTreeWidget that supports dragging folder items for reparenting."""
+
+    def __init__(self, tree_owner):
+        super().__init__()
+        self._owner = tree_owner  # FolderTree instance
+        self._drag_start_pos = None
+        self.setDragEnabled(True)
+        self.setDragDropMode(QAbstractItemView.DropOnly)
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_start_pos = event.pos()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if (event.buttons() & Qt.LeftButton and
+                self._drag_start_pos is not None and
+                (event.pos() - self._drag_start_pos).manhattanLength() >= 8):
+            item = self.itemAt(self._drag_start_pos)
+            if item:
+                data = item.data(0, Qt.UserRole)
+                if data and isinstance(data, dict):
+                    self._drag_start_pos = None
+                    drag = QDrag(self)
+                    mime = QMimeData()
+                    mime.setData(FOLDER_DRAG_MIME, str(data["id"]).encode())
+                    drag.setMimeData(mime)
+                    drag.exec_(Qt.MoveAction)
+                    return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_start_pos = None
+        super().mouseReleaseEvent(event)
+
+    # ── Drag-drop event handlers (delegate to owner) ──────────────
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasFormat(FOLDER_MIME) or event.mimeData().hasFormat(FOLDER_DRAG_MIME):
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        mime = event.mimeData()
+        if mime.hasFormat(FOLDER_MIME) or mime.hasFormat(FOLDER_DRAG_MIME):
+            item = self.itemAt(event.pos())
+            if item:
+                self.setCurrentItem(item)
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event: QDropEvent):
+        mime = event.mimeData()
+        item = self.itemAt(event.pos())
+
+        if mime.hasFormat(FOLDER_MIME):
+            self._owner._handle_prompt_drop(item, mime)
+            event.acceptProposedAction()
+        elif mime.hasFormat(FOLDER_DRAG_MIME):
+            self._owner._handle_folder_drop(item, mime)
+            event.acceptProposedAction()
+        else:
+            super().dropEvent(event)
 
 
 class FolderTree(QWidget):
@@ -71,7 +142,7 @@ class FolderTree(QWidget):
         layout.addLayout(header)
 
         # Tree widget
-        self._tree = QTreeWidget()
+        self._tree = _FolderTreeWidget(self)
         self._tree.setHeaderHidden(True)
         self._tree.setIndentation(16)
         self._tree.setAnimated(True)
@@ -319,40 +390,51 @@ class FolderTree(QWidget):
             return edit.text().strip()
         return None
 
-    # ── Drag-drop support ────────────────────────────────────────
+    # ── Drag-drop handlers (called from _FolderTreeWidget) ────────
 
-    def dragEnterEvent(self, event: QDragEnterEvent):
-        if event.mimeData().hasFormat(FOLDER_MIME):
-            event.acceptProposedAction()
+    def _handle_prompt_drop(self, item, mime):
+        """Handle prompt drop onto a tree folder (from history panel)."""
+        prompt_id = int(mime.data(FOLDER_MIME).data().decode())
+        folder_data = item.data(0, Qt.UserRole) if item else None
+        if folder_data and isinstance(folder_data, dict):
+            target_id = folder_data["id"]
         else:
-            super().dragEnterEvent(event)
+            target_id = None  # Dropped on "All" or empty area
+        database.move_prompt_to_folder(prompt_id, target_id)
+        self.folder_changed.emit(self._current_folder_id)
 
-    def dragMoveEvent(self, event):
-        if event.mimeData().hasFormat(FOLDER_MIME):
-            item = self._tree.itemAt(self._tree.viewport().mapFrom(
-                self.mapToGlobal(event.pos())))
-            if item:
-                self._tree.setCurrentItem(item)
-            event.acceptProposedAction()
-        else:
-            super().dragMoveEvent(event)
+    def _handle_folder_drop(self, item, mime):
+        """Handle folder reparent drag-drop."""
+        src_id = int(mime.data(FOLDER_DRAG_MIME).data().decode())
+        target_data = item.data(0, Qt.UserRole) if item else None
 
-    def dropEvent(self, event: QDropEvent):
-        if event.mimeData().hasFormat(FOLDER_MIME):
-            prompt_id = int(event.mimeData().data(FOLDER_MIME).data().decode())
-            item = self._tree.itemAt(self._tree.viewport().mapFrom(
-                self.mapToGlobal(event.pos())))
-            folder_data = item.data(0, Qt.UserRole) if item else None
-            if folder_data and isinstance(folder_data, dict):
-                target_id = folder_data["id"]
-            else:
-                target_id = None  # Dropped on "All" or empty area
-            database.move_prompt_to_folder(prompt_id, target_id)
-            # Refresh history by re-emitting current folder
-            self.folder_changed.emit(self._current_folder_id)
-            event.acceptProposedAction()
-        else:
-            super().dropEvent(event)
+        # Reject if target is "All", empty, or not a folder
+        if not target_data or not isinstance(target_data, dict):
+            return
+        target_id = target_data["id"]
+
+        # Reject self-drop
+        if src_id == target_id:
+            return
+
+        # Reject circular reference (dropping onto own descendant)
+        descendants = database.get_subfolder_ids(src_id)
+        if target_id in descendants:
+            return
+
+        # Compute new position (max sibling + 1)
+        conn = database.get_connection()
+        row = conn.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM folders WHERE parent_id = ?",
+            (target_id,)
+        ).fetchone()
+        conn.close()
+        new_pos = row["next_pos"] if row else 0
+
+        database.move_folder(src_id, target_id, new_pos)
+        self._expanded_ids.add(target_id)
+        self._rebuild_tree()
+        self.folder_changed.emit(self._current_folder_id)
 
     # ── Public API ───────────────────────────────────────────────
 

@@ -751,14 +751,22 @@ class FloatingWindow(QWidget):
         folders = database.get_all_folders()
         if folders:
             menu.addSeparator()
-            for f in folders:
-                folder_menu = menu.addMenu(f"  {f['name']}")
-                folder_menu.addAction("Open in main window").triggered.connect(
-                    lambda checked, fid=f["id"]: self._on_folder_clicked(fid))
-                folder_menu.addSeparator()
-                self._fill_prompt_items(folder_menu, f["id"])
+            self._build_folder_favorites(menu, folders, None)
 
         menu.exec_(self._star_btn.mapToGlobal(self._star_btn.rect().bottomLeft()))
+
+    def _build_folder_favorites(self, parent_menu, folders, parent_id):
+        """Recursively build folder submenus for the favorites menu."""
+        children = [f for f in folders if f.get("parent_id") == parent_id]
+        for f in children:
+            has_children = any(sf.get("parent_id") == f["id"] for sf in folders)
+            folder_menu = parent_menu.addMenu(f"  {f['name']}")
+            folder_menu.addAction("Open in main window").triggered.connect(
+                lambda checked, fid=f["id"]: self._on_folder_clicked(fid))
+            folder_menu.addSeparator()
+            if has_children:
+                self._build_folder_favorites(folder_menu, folders, f["id"])
+            self._fill_prompt_items(folder_menu, f["id"])
 
     def _fill_prompt_items(self, menu, folder_id):
         prompts = database.get_all_prompts(folder_id=folder_id)

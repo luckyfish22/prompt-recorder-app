@@ -48,11 +48,24 @@ def init_db():
         conn.execute("SELECT folder_id FROM prompts LIMIT 1")
     except sqlite3.OperationalError:
         conn.execute("ALTER TABLE prompts ADD COLUMN folder_id INTEGER REFERENCES folders(id)")
-    # Migration: add position column if missing
+    # Migration: add position column on prompts if missing
     try:
         conn.execute("SELECT position FROM prompts LIMIT 1")
     except sqlite3.OperationalError:
         conn.execute("ALTER TABLE prompts ADD COLUMN position INTEGER DEFAULT 0")
+    # Migration: add parent_id column to folders (nested folder support)
+    try:
+        conn.execute("SELECT parent_id FROM folders LIMIT 1")
+    except sqlite3.OperationalError:
+        conn.execute("ALTER TABLE folders ADD COLUMN parent_id INTEGER REFERENCES folders(id)")
+    # Migration: add position column to folders
+    try:
+        conn.execute("SELECT position FROM folders LIMIT 1")
+    except sqlite3.OperationalError:
+        conn.execute("ALTER TABLE folders ADD COLUMN position INTEGER DEFAULT 0")
+        existing = conn.execute("SELECT id FROM folders ORDER BY id").fetchall()
+        for idx, row in enumerate(existing):
+            conn.execute("UPDATE folders SET position = ? WHERE id = ?", (idx, row["id"]))
     conn.commit()
     conn.close()
 
@@ -145,14 +158,41 @@ def delete_prompt(prompt_id):
 
 def get_all_folders():
     conn = get_connection()
-    rows = conn.execute("SELECT * FROM folders ORDER BY created_at").fetchall()
+    rows = conn.execute(
+        "SELECT * FROM folders ORDER BY parent_id IS NULL DESC, parent_id, position, name"
+    ).fetchall()
     conn.close()
     return rows
 
 
-def add_folder(name):
+def get_subfolder_ids(folder_id):
+    """Return a set of all descendant folder IDs (including folder_id itself)."""
     conn = get_connection()
-    cursor = conn.execute("INSERT INTO folders (name) VALUES (?)", (name,))
+    result = set()
+    queue = [folder_id]
+    while queue:
+        pid = queue.pop()
+        result.add(pid)
+        children = conn.execute(
+            "SELECT id FROM folders WHERE parent_id = ?", (pid,)
+        ).fetchall()
+        queue.extend(row["id"] for row in children)
+    conn.close()
+    return result
+
+
+def add_folder(name, parent_id=None):
+    conn = get_connection()
+    # Auto-assign position: max position among siblings + 1
+    row = conn.execute(
+        "SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM folders WHERE parent_id IS ?",
+        (parent_id,)
+    ).fetchone()
+    position = row["next_pos"] if row else 0
+    cursor = conn.execute(
+        "INSERT INTO folders (name, parent_id, position) VALUES (?, ?, ?)",
+        (name, parent_id, position)
+    )
     conn.commit()
     folder_id = cursor.lastrowid
     conn.close()
@@ -168,8 +208,12 @@ def rename_folder(folder_id, name):
 
 def delete_folder(folder_id):
     conn = get_connection()
-    conn.execute("UPDATE prompts SET folder_id = NULL WHERE folder_id = ?", (folder_id,))
-    conn.execute("DELETE FROM folders WHERE id = ?", (folder_id,))
+    # Collect all descendant folder IDs for cascade delete
+    descendant_ids = get_subfolder_ids(folder_id)
+    # Unlink prompts from all affected folders
+    for fid in sorted(descendant_ids, reverse=True):
+        conn.execute("UPDATE prompts SET folder_id = NULL WHERE folder_id = ?", (fid,))
+        conn.execute("DELETE FROM folders WHERE id = ?", (fid,))
     conn.commit()
     conn.close()
 
@@ -177,6 +221,24 @@ def delete_folder(folder_id):
 def move_prompt_to_folder(prompt_id, folder_id):
     conn = get_connection()
     conn.execute("UPDATE prompts SET folder_id = ? WHERE id = ?", (folder_id, prompt_id))
+    conn.commit()
+    conn.close()
+
+
+def update_folder_position(folder_id, position):
+    conn = get_connection()
+    conn.execute("UPDATE folders SET position = ? WHERE id = ?", (position, folder_id))
+    conn.commit()
+    conn.close()
+
+
+def move_folder(folder_id, new_parent_id, new_position):
+    """Move a folder to a new parent and position."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE folders SET parent_id = ?, position = ? WHERE id = ?",
+        (new_parent_id, new_position, folder_id)
+    )
     conn.commit()
     conn.close()
 

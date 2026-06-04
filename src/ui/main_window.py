@@ -9,7 +9,7 @@ from src.db import database
 from src.ui.theme import STYLESHEET, COLORS, FONT_CAPTION, FONT_TITLE, MAX_TITLE_LENGTH, set_app_font
 from src.ui.input_panel import InputPanel
 from src.ui.history_panel import HistoryPanel
-from src.ui.folder_bar import FolderBar
+from src.ui.folder_tree import FolderTree
 from src.ui.analysis_dialog import AnalysisDialog
 from src.ui.settings_dialog import SettingsDialog
 
@@ -117,9 +117,10 @@ class MainWindow(QMainWindow):
         title_layout.addStretch()
         title_layout.addWidget(self._settings_btn)
 
-        # Folder bar
-        self._folder_bar = FolderBar()
-        self._folder_bar.folder_changed.connect(self._on_folder_changed)
+        # Folder tree sidebar
+        self._folder_tree = FolderTree()
+        self._folder_tree.setFixedWidth(200)
+        self._folder_tree.folder_changed.connect(self._on_folder_changed)
 
         # Two-panel splitter
         splitter = QSplitter(Qt.Horizontal)
@@ -139,10 +140,22 @@ class MainWindow(QMainWindow):
             f"background: {COLORS['bg']}; border-top: 1px solid {COLORS['border']};"
         )
 
+        # Right content area
+        content_layout = QVBoxLayout()
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+        content_layout.addWidget(splitter, stretch=1)
+        content_layout.addWidget(self._status)
+
+        # Main body: sidebar + content
+        main_body = QHBoxLayout()
+        main_body.setContentsMargins(0, 0, 0, 0)
+        main_body.setSpacing(0)
+        main_body.addWidget(self._folder_tree)
+        main_body.addLayout(content_layout, stretch=1)
+
         root_layout.addWidget(title_bar)
-        root_layout.addWidget(self._folder_bar)
-        root_layout.addWidget(splitter, stretch=1)
-        root_layout.addWidget(self._status)
+        root_layout.addLayout(main_body, stretch=1)
 
         # Connect signals
         self._input_panel.save_requested.connect(self._on_save_prompt)
@@ -155,7 +168,7 @@ class MainWindow(QMainWindow):
             self._floating.folder_selected.connect(self._on_floating_folder_selected)
 
     def _on_floating_folder_selected(self, folder_id):
-        self._folder_bar.select_folder(folder_id)
+        self._folder_tree.select_folder(folder_id)
 
     def _on_prompt_changed(self):
         if self._floating:

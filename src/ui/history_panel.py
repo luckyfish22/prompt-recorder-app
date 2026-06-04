@@ -7,7 +7,7 @@ from PyQt5.QtCore import pyqtSignal, Qt, QMimeData, QPoint, QItemSelectionModel,
 from PyQt5.QtGui import QCursor, QDrag, QPainter, QPen, QColor
 from src.db import database
 from src.ui.theme import COLORS, FONT_BODY, FONT_CAPTION, FONT_MICRO, MAX_TITLE_LENGTH
-from src.ui.folder_bar import FOLDER_MIME
+from src.ui.folder_tree import FOLDER_MIME
 
 REORDER_MIME = "application/x-promptrecorder-reorder"
 
@@ -286,11 +286,7 @@ class HistoryPanel(QWidget):
             all_action.setEnabled(False)
         if folders:
             move_menu.addSeparator()
-            for f in folders:
-                f_action = move_menu.addAction(f"  {f['name']}")
-                f_action.triggered.connect(lambda checked, fid=f["id"]: self._move_to_folder(data, fid))
-                if current_folder == f["id"]:
-                    f_action.setEnabled(False)
+            self._build_folder_menu(move_menu, folders, None, current_folder, data)
 
         menu.addSeparator()
 
@@ -298,6 +294,29 @@ class HistoryPanel(QWidget):
         delete_action.triggered.connect(lambda: self._delete_prompt(data))
 
         menu.exec_(QCursor.pos())
+
+    def _build_folder_menu(self, parent_menu, folders, parent_id, current_folder_id, prompt_data):
+        """Recursively build folder submenus for nested folders."""
+        children = [f for f in folders if f.get("parent_id") == parent_id]
+        for f in children:
+            has_children = any(sf.get("parent_id") == f["id"] for sf in folders)
+            if has_children:
+                sub_menu = parent_menu.addMenu(f"  {f['name']}")
+                move_action = sub_menu.addAction("Move here")
+                if current_folder_id == f["id"]:
+                    move_action.setEnabled(False)
+                else:
+                    move_action.triggered.connect(
+                        lambda checked, fid=f["id"]: self._move_to_folder(prompt_data, fid))
+                sub_menu.addSeparator()
+                self._build_folder_menu(sub_menu, folders, f["id"], current_folder_id, prompt_data)
+            else:
+                action = parent_menu.addAction(f"  {f['name']}")
+                if current_folder_id == f["id"]:
+                    action.setEnabled(False)
+                else:
+                    action.triggered.connect(
+                        lambda checked, fid=f["id"]: self._move_to_folder(prompt_data, fid))
 
     def _edit_prompt(self, data: dict):
         dlg = QDialog(self)

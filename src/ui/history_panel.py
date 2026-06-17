@@ -130,6 +130,7 @@ class HistoryPanel(QWidget):
     prompt_deleted = pyqtSignal()
     analysis_requested = pyqtSignal(dict)
     prompt_changed = pyqtSignal()
+    folder_clicked = pyqtSignal(int)  # emitted when a sub-folder entry is clicked
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -157,6 +158,22 @@ class HistoryPanel(QWidget):
     def refresh(self, search=None, folder_id=None):
         self._list.clear()
         self._list.clearSelection()
+
+        # Show sub-folders at top (only when not searching)
+        if folder_id is not None and not search:
+            all_folders = database.get_all_folders()
+            sub_folders = [f for f in all_folders if f.get("parent_id") == folder_id]
+            for f in sub_folders:
+                widget = self._build_folder_entry_widget(f)
+                item = QListWidgetItem()
+                hint = widget.sizeHint()
+                hint.setHeight(hint.height() + 6)
+                item.setSizeHint(hint)
+                # Store folder data with a marker to distinguish from prompts
+                item.setData(Qt.UserRole, {"__is_folder__": True, "folder": f})
+                self._list.addItem(item)
+                self._list.setItemWidget(item, widget)
+
         prompts = database.get_all_prompts(search, folder_id)
         for p in prompts:
             widget = self._build_item_widget(p)
@@ -232,6 +249,35 @@ class HistoryPanel(QWidget):
         outer.addLayout(inner, stretch=1)
         return w
 
+    def _build_folder_entry_widget(self, folder: dict):
+        """Build a widget for a sub-folder entry in the history list."""
+        w = QWidget()
+        w.setAttribute(Qt.WA_TranslucentBackground)
+        w.setStyleSheet(f"background: {COLORS['accent_bg']}; border-radius: 4px;")
+
+        layout = QHBoxLayout(w)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(8)
+
+        # Folder icon (▶ arrow)
+        icon = QLabel("▶")
+        icon.setStyleSheet(
+            f"color: {COLORS['primary']}; font-size: {FONT_CAPTION}px; "
+            f"background: transparent; border: none;"
+        )
+        icon.setFixedWidth(14)
+        layout.addWidget(icon)
+
+        # Folder name
+        name_label = QLabel(folder["name"])
+        name_label.setStyleSheet(
+            f"color: {COLORS['primary']}; font-size: {FONT_BODY}px; font-weight: bold; "
+            f"background: transparent; border: none;"
+        )
+        layout.addWidget(name_label, stretch=1)
+
+        return w
+
     def _on_search(self, text):
         self.refresh(text if text else None, self._folder_id)
 
@@ -239,6 +285,11 @@ class HistoryPanel(QWidget):
         data = item.data(Qt.UserRole)
         if not data:
             return
+        # Sub-folder entry — navigate into it
+        if data.get("__is_folder__"):
+            self.folder_clicked.emit(data["folder"]["id"])
+            return
+        # Prompt entry — copy to clipboard
         text = data.get("optimized_text") or data["original_text"]
         QApplication.clipboard().setText(text)
         self.prompt_selected.emit(data)
@@ -248,7 +299,7 @@ class HistoryPanel(QWidget):
         if not item:
             return
         data = item.data(Qt.UserRole)
-        if not data:
+        if not data or data.get("__is_folder__"):
             return
 
         menu = QMenu(self)

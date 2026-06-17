@@ -3,11 +3,14 @@ import os
 from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
 from PyQt5.QtCore import Qt
+from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 from PyQt5.QtGui import QCursor
 from src.ui.floating_window import FloatingWindow
 from src.ui.main_window import MainWindow
 from src.ui.theme import set_app_font
 from src.config_loader import config
+
+SERVER_NAME = "PromptRecorderSingleInstance"
 
 
 def _create_tray_icon():
@@ -36,6 +39,16 @@ def main():
     app.setApplicationName("Prompt Recorder")
     app.setQuitOnLastWindowClosed(False)
     set_app_font(app, config.font_family)
+
+    # Single-instance check
+    socket = QLocalSocket()
+    socket.connectToServer(SERVER_NAME)
+    if socket.waitForConnected(500):
+        # Another instance is running — notify it and exit
+        socket.disconnectFromServer()
+        sys.exit(0)
+    server = QLocalServer()
+    server.listen(SERVER_NAME)
 
     tray = QSystemTrayIcon()
     tray.setIcon(_create_tray_icon())
@@ -87,6 +100,14 @@ def main():
 
     # Floating window connections
     floating.show_main_requested.connect(window.restore)
+
+    # When second instance tries to launch, bring windows to front
+    def _on_second_instance():
+        floating.show()
+        floating.raise_()
+        floating.activateWindow()
+        window.restore()
+    server.newConnection.connect(_on_second_instance)
 
     # Show
     tray.show()

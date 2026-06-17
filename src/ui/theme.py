@@ -19,7 +19,7 @@ FONT_BODY    = 22  # 正文：输入框、提示词列表项、按钮文字
 FONT_HEADER  = 22  # 区域标题：各面板标题（"History"、"Input"）
 FONT_CAPTION = 19  # 辅助标签：文件夹标签、状态栏、设置项标签
 FONT_MICRO   = 15  # 微小文字：历史记录时间戳
-FONT_FLOAT   = 17  # 悬浮窗：下拉框、翻译输入框
+FONT_FLOAT   = 20  # 悬浮窗：下拉框、翻译输入框
 FONT_TITLE   = 28  # 主标题：顶部 "Prompt Recorder"
 
 MAX_TITLE_LENGTH = 20  # 提示词标题最大字符数

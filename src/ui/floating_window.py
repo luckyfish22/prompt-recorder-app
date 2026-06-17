@@ -1,6 +1,7 @@
-from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QComboBox, QPushButton,
-                                 QApplication, QSizePolicy, QMenu, QLineEdit,
-                                 QLabel, QFrame, QVBoxLayout, QWidgetAction)
+from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QPushButton,
+                                 QApplication, QMenu, QLineEdit,
+                                 QLabel, QFrame, QVBoxLayout,
+                                 QScrollArea, QToolTip)
 from PyQt5.QtCore import Qt, pyqtSignal, QEvent, QTimer, QThread, QPoint
 import math
 from PyQt5.QtGui import QMouseEvent, QCursor, QPainter, QPen, QColor, QPainterPath
@@ -68,32 +69,21 @@ def _make_command_icon(size=28):
 
 
 class _ModeToggle(QPushButton):
-    """Toggle button that draws a square with a diagonal slash."""
+    """Toggle button — shows translate icon or command icon, click to switch."""
     def __init__(self):
         super().__init__()
-        self.setFixedSize(28, 28)
+        self.setFixedSize(40, 40)
         self.setCursor(Qt.PointingHandCursor)
-        self._active = False
+        self._mode = "translate"  # "translate" | "explain"
 
-    def set_active(self, active: bool):
-        self._active = active
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        s = 4
-        w = self.width() - 2 * s
-        h = self.height() - 2 * s
-        color = QColor(COLORS["primary"] if self._active else COLORS["text_secondary"])
-        pen = QPen(color)
-        pen.setWidthF(1.8)
-        pen.setCapStyle(Qt.RoundCap)
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRoundedRect(s, s, w, h, 4, 4)
-        pad = 5
-        painter.drawLine(s + w - pad, s + pad, s + pad, s + h - pad)
+    def set_mode(self, mode: str):
+        self._mode = mode
+        icon_size = self.width() - 8
+        if mode == "translate":
+            self.setIcon(_make_translate_icon(icon_size))
+        else:
+            self.setIcon(_make_command_icon(icon_size))
+        self.setIconSize(self.iconSize())
 
 
 class _TranslationWorker(QThread):
@@ -120,7 +110,7 @@ class FloatingWindow(QWidget):
     def __init__(self):
         super().__init__(flags=Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self._drag_pos = None
-        self._query_mode = None  # None, "translate", "explain"
+        self._query_mode = "translate"  # "translate" | "explain"
         self._trans_timer = QTimer(self)
         self._trans_timer.setSingleShot(True)
         self._trans_timer.timeout.connect(self._do_translate)
@@ -135,12 +125,12 @@ class FloatingWindow(QWidget):
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
         self._init_ui()
-        self.refresh()
+        self._enter_mode("translate")
 
     def _init_ui(self):
-        self.setFixedHeight(52)
-        self.setMinimumWidth(340)
-        self.resize(420, 52)
+        self.setFixedHeight(56)
+        self.setMinimumWidth(380)
+        self.resize(450, 56)
         self.setAttribute(Qt.WA_Hover, True)
         self.setObjectName("floatingWindow")
         self.setStyleSheet(f"""
@@ -154,9 +144,9 @@ class FloatingWindow(QWidget):
         layout.setContentsMargins(10, 6, 10, 6)
         layout.setSpacing(6)
 
-        # Mode toggle button — square with diagonal slash
+        # Mode toggle button — click to switch translate ↔ explain
         self._mode_btn = _ModeToggle()
-        self._mode_btn.setToolTip("<span style='font-size:18px'>Query: translate / explain commands</span>")
+        self._mode_btn.setToolTip("<span style='font-size:18px'>Switch translate / explain</span>")
         self._mode_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
@@ -168,7 +158,7 @@ class FloatingWindow(QWidget):
                 background-color: {COLORS['accent_bg']};
             }}
         """)
-        self._mode_btn.clicked.connect(self._show_mode_menu)
+        self._mode_btn.clicked.connect(self._toggle_mode)
         layout.addWidget(self._mode_btn)
 
         # Translation input (hidden in normal mode)
@@ -190,6 +180,7 @@ class FloatingWindow(QWidget):
         """)
         self._trans_input.setContextMenuPolicy(Qt.CustomContextMenu)
         self._trans_input.customContextMenuRequested.connect(self._on_trans_context_menu)
+        self._trans_input.setMaximumWidth(240)
         self._trans_input.textChanged.connect(self._on_trans_text_changed)
         self._trans_input.installEventFilter(self)
         self._trans_input.hide()
@@ -214,12 +205,13 @@ class FloatingWindow(QWidget):
         """)
         self._cmd_input.setContextMenuPolicy(Qt.CustomContextMenu)
         self._cmd_input.customContextMenuRequested.connect(self._on_trans_context_menu)
+        self._cmd_input.setMaximumWidth(240)
         self._cmd_input.textChanged.connect(self._on_cmd_text_changed)
         self._cmd_input.installEventFilter(self)
         self._cmd_input.hide()
         layout.addWidget(self._cmd_input, stretch=1)
 
-        # Translation result popup (dropdown below input)
+        # Translation result popup (dropdown below input) with scroll support
         self._trans_popup = QFrame()
         self._trans_popup.setWindowFlags(Qt.ToolTip | Qt.FramelessWindowHint)
         self._trans_popup.setMinimumWidth(300)
@@ -231,67 +223,57 @@ class FloatingWindow(QWidget):
             }}
         """)
         popup_layout = QVBoxLayout(self._trans_popup)
-        popup_layout.setContentsMargins(12, 10, 12, 10)
+        popup_layout.setContentsMargins(0, 0, 0, 0)
+
+        self._trans_scroll = QScrollArea()
+        self._trans_scroll.setWidgetResizable(True)
+        self._trans_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._trans_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._trans_scroll.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background: transparent;
+            }}
+            QScrollBar:vertical {{
+                background: transparent;
+                width: 6px;
+                margin: 4px 2px 4px 0px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {COLORS['border']};
+                border-radius: 3px;
+                min-height: 20px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background-color: {COLORS['text_secondary']};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
+        """)
+
         self._trans_label = QLabel("")
         self._trans_label.setWordWrap(True)
         self._trans_label.setStyleSheet(
             f"color: {COLORS['text_primary']}; font-size: {FONT_FLOAT}px; "
             f"border: none; background: transparent; "
-            f"padding: 4px 2px; line-height: 1.5;"
+            f"padding: 10px 12px; line-height: 1.5;"
         )
         self._trans_label.setCursor(Qt.PointingHandCursor)
         self._trans_label.mousePressEvent = lambda e: self._copy_translation()
-        popup_layout.addWidget(self._trans_label)
+
+        self._trans_scroll.setWidget(self._trans_label)
+        popup_layout.addWidget(self._trans_scroll)
         self._trans_popup.hide()
-
-        self._combo = QComboBox()
-        self._combo.setCursor(Qt.PointingHandCursor)
-        self._combo.setMaximumWidth(220)
-        self._combo.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-        self._combo.setStyleSheet(f"""
-            QComboBox {{
-                background-color: transparent;
-                border: none;
-                color: {COLORS['text_primary']};
-
-                font-size: {FONT_FLOAT}px;
-                padding: 2px 4px;
-            }}
-            QComboBox:hover {{
-                background-color: {COLORS['accent_bg']};
-                border-radius: 4px;
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 20px;
-            }}
-            QComboBox QAbstractItemView {{
-                background-color: {COLORS['surface']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 4px;
-                color: {COLORS['text_primary']};
-                font-size: {FONT_FLOAT}px;
-                selection-background-color: {COLORS['accent_bg']};
-                selection-color: {COLORS['text_primary']};
-                padding: 4px;
-                outline: none;
-            }}
-            QComboBox QAbstractItemView::item {{
-                padding: 6px 8px;
-                border-radius: 3px;
-            }}
-            QComboBox QAbstractItemView::item:hover {{
-                background-color: {COLORS['accent_bg']};
-            }}
-        """)
-        self._combo.activated.connect(self._on_item_selected)
-        layout.addWidget(self._combo)
 
         layout.addStretch()
 
         # Star button — Edge-style favorites dropdown
         self._star_btn = QPushButton("★")
-        self._star_btn.setFixedSize(36, 36)
+        self._star_btn.setFixedSize(40, 40)
         self._star_btn.setCursor(Qt.PointingHandCursor)
         self._star_btn.setToolTip("Favorites")
         self._star_btn.setStyleSheet(f"""
@@ -299,7 +281,7 @@ class FloatingWindow(QWidget):
                 background-color: transparent;
                 color: {COLORS['text_secondary']};
                 border: none;
-                border-radius: 13px;
+                border-radius: 20px;
                 font-size: 20px;
                 padding: 0px;
             }}
@@ -312,7 +294,7 @@ class FloatingWindow(QWidget):
         layout.addWidget(self._star_btn)
 
         self._main_btn = QPushButton("+")
-        self._main_btn.setFixedSize(36, 36)
+        self._main_btn.setFixedSize(40, 40)
         self._main_btn.setCursor(Qt.PointingHandCursor)
         self._main_btn.setToolTip("Open main window")
         self._main_btn.setStyleSheet(f"""
@@ -320,7 +302,7 @@ class FloatingWindow(QWidget):
                 background-color: {COLORS['accent_bg']};
                 color: {COLORS['primary']};
                 border: none;
-                border-radius: 13px;
+                border-radius: 20px;
                 font-size: 24px;
                 font-weight: bold;
                 padding: 0px;
@@ -334,29 +316,7 @@ class FloatingWindow(QWidget):
         layout.addWidget(self._main_btn)
 
     def refresh(self):
-        self._combo.clear()
-        prompts = database.get_all_prompts()
-        if not prompts:
-            self._combo.addItem("(No records)")
-            self._combo.setItemData(0, "", Qt.UserRole)
-            return
-
-        self._combo.addItem("Copy recent prompts...")
-        self._combo.setItemData(0, "", Qt.UserRole)
-        for p in prompts[:20]:
-            title = p.get("title") or p["original_text"].replace("\n", " ")[:30]
-            text = p.get("optimized_text") or p["original_text"]
-            self._combo.addItem(f"  {title}", text)
-            idx = self._combo.count() - 1
-            escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            self._combo.setItemData(idx, f"<span style='font-size:18px'>{escaped}</span>", Qt.ToolTipRole)
-        self._combo.setCurrentIndex(0)
-
-    def _on_item_selected(self, index):
-        text = self._combo.itemData(index, Qt.UserRole)
-        if text:
-            QApplication.clipboard().setText(text)
-        self._combo.setCurrentIndex(0)
+        pass  # No longer needed — combo removed
 
     def _paint_blob_path(self, w, h, inset, r, variation, seed):
         """Generate an organic paint-spread path by perturbing rounded-rect perimeter."""
@@ -572,66 +532,19 @@ class FloatingWindow(QWidget):
 
     # --- Query modes (translate / explain) ---
 
-    def _show_mode_menu(self):
-        """Show dropdown menu, or exit to normal mode if already in a query mode."""
-        if self._query_mode is not None:
-            self._exit_query_mode()
-            return
-
-        menu = QMenu(self)
-        menu.setStyleSheet(f"""
-            QMenu {{
-                background-color: {COLORS['surface']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 6px;
-                padding: 4px;
-            }}
-        """)
-
-        icon_size = 24
-
-        is_translate = self._query_mode == "translate"
-        is_explain = self._query_mode == "explain"
-
-        def _make_icon_action(menu, icon_func, active):
-            pix = icon_func(icon_size).pixmap(icon_size, icon_size)
-            w = QWidget()
-            w.setFixedSize(icon_size + 14, icon_size + 12)
-            if active:
-                w.setStyleSheet(f"background: {COLORS['accent_bg']}; border-radius: 4px;")
-            lay = QHBoxLayout(w)
-            lay.setContentsMargins(0, 0, 0, 0)
-            lbl = QLabel()
-            lbl.setPixmap(pix)
-            lbl.setFixedSize(icon_size, icon_size)
-            lay.addWidget(lbl, alignment=Qt.AlignCenter)
-            act = QWidgetAction(menu)
-            act.setDefaultWidget(w)
-            menu.addAction(act)
-            return act
-
-        trans_action = _make_icon_action(menu, _make_translate_icon, is_translate)
-        cmd_action = _make_icon_action(menu, _make_command_icon, is_explain)
-
-        action = menu.exec_(self._mode_btn.mapToGlobal(
-            self._mode_btn.rect().bottomLeft() + QPoint(0, 4)))
-
-        if action == trans_action:
-            if is_translate:
-                self._exit_query_mode()
-            else:
-                self._enter_mode("translate")
-        elif action == cmd_action:
-            if is_explain:
-                self._exit_query_mode()
-            else:
-                self._enter_mode("explain")
+    def _toggle_mode(self):
+        """Toggle between translation and command explanation."""
+        if self._query_mode == "translate":
+            self._enter_mode("explain")
+        else:
+            self._enter_mode("translate")
 
     def _enter_mode(self, mode: str):
         self._query_mode = mode
-        self._mode_btn.set_active(True)
-        self._combo.hide()
-        self._star_btn.hide()
+        self._mode_btn.set_mode(mode)
+        self._trans_input.clear()
+        self._cmd_input.clear()
+        self._trans_popup.hide()
 
         if mode == "translate":
             self._cmd_input.hide()
@@ -641,20 +554,6 @@ class FloatingWindow(QWidget):
             self._trans_input.hide()
             self._cmd_input.show()
             self._cmd_input.setFocus()
-
-        self.resize(460, 52)
-
-    def _exit_query_mode(self):
-        self._query_mode = None
-        self._mode_btn.set_active(False)
-        self._trans_input.hide()
-        self._cmd_input.hide()
-        self._trans_popup.hide()
-        self._trans_input.clear()
-        self._cmd_input.clear()
-        self._combo.show()
-        self._star_btn.show()
-        self.resize(420, 52)
 
     def _on_trans_text_changed(self, text: str):
         if not text.strip():
@@ -691,13 +590,19 @@ class FloatingWindow(QWidget):
             return
         self._trans_label.setText(text)
         # Position popup below the floating window, clamped to its width
-        max_w = self.width() - 20  # 10px margin each side
-        self._trans_popup.setMaximumWidth(max_w)
-        self._trans_popup.adjustSize()
-        w = min(self._trans_popup.width(), max_w)
+        popup_w = self.width() - 20  # 10px margin each side
+        # Compute label content height at the scroll area's interior width
+        scroll_pad = 8  # scrollbar gutter + internal margins
+        label_w = popup_w - scroll_pad
+        content_h = self._trans_label.heightForWidth(label_w) + 24  # 24 for label padding
+        # Cap popup height so it doesn't overflow screen
+        screen_h = QApplication.primaryScreen().availableGeometry().height()
+        pos_y = self.mapToGlobal(QPoint(0, self.height() + 4)).y()
+        max_h = min(520, screen_h - pos_y - 40)
+        popup_h = min(content_h + 4, max_h)  # +4 for frame border
         pos = self.mapToGlobal(QPoint(10, self.height() + 4))
         self._trans_popup.move(pos)
-        self._trans_popup.resize(w, self._trans_popup.height())
+        self._trans_popup.resize(popup_w, popup_h)
         self._trans_popup.show()
 
     def _on_trans_context_menu(self, pos):
@@ -724,6 +629,7 @@ class FloatingWindow(QWidget):
 
     def _show_favorites_menu(self):
         menu = QMenu(self)
+        menu.setToolTipsVisible(True)
         menu.setStyleSheet(f"""
             QMenu {{
                 background-color: {COLORS['surface']};
@@ -753,6 +659,7 @@ class FloatingWindow(QWidget):
             menu.addSeparator()
             self._build_folder_favorites(menu, folders, None)
 
+        self._connect_menu_hover(menu)
         menu.exec_(self._star_btn.mapToGlobal(self._star_btn.rect().bottomLeft()))
 
     def _build_folder_favorites(self, parent_menu, folders, parent_id):
@@ -779,6 +686,28 @@ class FloatingWindow(QWidget):
             text = p.get("optimized_text") or p["original_text"]
             action = menu.addAction(f"  {title}")
             action.triggered.connect(lambda checked, t=text: self._copy_prompt(t))
+            # Store full prompt text for tooltip on hover
+            tip = p["original_text"]
+            optimized = p.get("optimized_text", "")
+            if optimized:
+                tip += "\n\n--- Optimized ---\n" + optimized
+            action.setData(tip)
+
+    def _connect_menu_hover(self, menu):
+        """Recursively connect hovered signal on menu and all submenus."""
+        menu.hovered.connect(self._on_menu_hovered)
+        for action in menu.actions():
+            if action.menu():
+                self._connect_menu_hover(action.menu())
+
+    def _on_menu_hovered(self, action):
+        """Show tooltip with full prompt text when hovering over a menu item."""
+        if action and action.data():
+            tip = action.data()
+            if isinstance(tip, str) and len(tip) > 0:
+                # Only show for prompt items (long text stored as data)
+                escaped = tip.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                QToolTip.showText(QCursor.pos(), f"<div style='font-size:18px'>{escaped}</div>")
 
     def _copy_prompt(self, text: str):
         QApplication.clipboard().setText(text)

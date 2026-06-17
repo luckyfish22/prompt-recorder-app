@@ -1,3 +1,4 @@
+import ctypes
 from PyQt5.QtWidgets import (QMainWindow, QHBoxLayout, QVBoxLayout,
                                  QWidget, QPushButton, QLabel, QLineEdit, QMessageBox, QDialog,
                                  QApplication)
@@ -6,7 +7,7 @@ from PyQt5.QtGui import QCloseEvent, QPainter, QFont, QPen, QColor, QFontMetrics
 from src.config_loader import config
 from src.api.deepseek_client import DeepSeekClient
 from src.db import database
-from src.ui.theme import STYLESHEET, COLORS, FONT_CAPTION, FONT_TITLE, MAX_TITLE_LENGTH, set_app_font
+from src.ui.theme import STYLESHEET, COLORS, FONT_BODY, FONT_CAPTION, FONT_TITLE, MAX_TITLE_LENGTH, set_app_font
 from src.ui.history_panel import HistoryPanel
 from src.ui.folder_tree import FolderTree
 from src.ui.analysis_dialog import AnalysisDialog
@@ -101,24 +102,24 @@ class MainWindow(QMainWindow):
 
         # Title bar
         title_bar = QWidget()
+        title_bar.setMinimumHeight(74)
         title_bar.setStyleSheet(f"background-color: {COLORS['surface']}; border-bottom: 1px solid {COLORS['border']};")
         title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(16, 8, 16, 8)
+        title_layout.setContentsMargins(16, 14, 16, 14)
 
         title = _TitleLabel("Prompt  Recorder", COLORS["primary"], FONT_TITLE)
 
         # Prompt input (compact, in title bar)
         self._prompt_input = QLineEdit()
         self._prompt_input.setPlaceholderText("Type or paste your prompt here…")
-        self._prompt_input.setFixedHeight(28)
         self._prompt_input.setStyleSheet(f"""
             QLineEdit {{
                 background-color: {COLORS['bg']};
                 border: 1px solid {COLORS['border']};
                 border-radius: 4px;
-                padding: 4px 12px;
+                padding: 10px 12px;
                 color: {COLORS['text_primary']};
-                font-size: 16px;
+                font-size: {FONT_BODY}px;
             }}
             QLineEdit:focus {{
                 border-color: {COLORS['primary']};
@@ -131,7 +132,16 @@ class MainWindow(QMainWindow):
         self._settings_btn.setCursor(Qt.PointingHandCursor)
         self._settings_btn.clicked.connect(self._open_settings)
 
+        # Input prompt indicator
+        prompt_icon = QLabel("▸")
+        prompt_icon.setStyleSheet(
+            f"color: {COLORS['primary']}; font-size: 32px; "
+            f"background: transparent; border: none; padding: 0px 6px 0px 0px;"
+        )
+        prompt_icon.setFixedWidth(26)
+
         title_layout.addWidget(title)
+        title_layout.addWidget(prompt_icon)
         title_layout.addWidget(self._prompt_input, stretch=1)
         title_layout.addSpacing(12)
         title_layout.addWidget(self._settings_btn)
@@ -173,6 +183,7 @@ class MainWindow(QMainWindow):
         self._history_panel.prompt_deleted.connect(self._on_prompt_deleted)
         self._history_panel.analysis_requested.connect(self._on_analysis_requested)
         self._history_panel.prompt_changed.connect(self._on_prompt_changed)
+        self._history_panel.folder_clicked.connect(self._on_history_folder_clicked)
 
         if self._floating:
             self._floating.folder_selected.connect(self._on_floating_folder_selected)
@@ -239,6 +250,10 @@ class MainWindow(QMainWindow):
         if self._floating:
             self._floating.refresh()
 
+    def _on_history_folder_clicked(self, folder_id):
+        """User clicked a sub-folder entry in the history panel."""
+        self._folder_tree.select_folder(folder_id)
+
     def _on_folder_changed(self, folder_id):
         self._current_folder_id = folder_id
         self._history_panel._folder_id = folder_id
@@ -289,3 +304,8 @@ class MainWindow(QMainWindow):
         self.show()
         self.raise_()
         self.activateWindow()
+        # Win32: force to foreground (reliable when called from another window)
+        if hasattr(ctypes, 'windll'):
+            hwnd = int(self.winId())
+            ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            ctypes.windll.user32.SetForegroundWindow(hwnd)

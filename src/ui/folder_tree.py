@@ -404,35 +404,36 @@ class FolderTree(QWidget):
         self.folder_changed.emit(self._current_folder_id)
 
     def _handle_folder_drop(self, item, mime):
-        """Handle folder reparent drag-drop."""
+        """Handle folder reparent drag-drop (or move to root on 'All')."""
         src_id = int(mime.data(FOLDER_DRAG_MIME).data().decode())
         target_data = item.data(0, Qt.UserRole) if item else None
 
-        # Reject if target is "All", empty, or not a folder
-        if not target_data or not isinstance(target_data, dict):
-            return
-        target_id = target_data["id"]
-
         # Reject self-drop
-        if src_id == target_id:
+        if target_data and isinstance(target_data, dict) and src_id == target_data["id"]:
             return
 
-        # Reject circular reference (dropping onto own descendant)
-        descendants = database.get_subfolder_ids(src_id)
-        if target_id in descendants:
-            return
+        # Determine target: None = root level (dropped on "All" or empty)
+        if target_data and isinstance(target_data, dict):
+            target_id = target_data["id"]
+            # Reject circular reference
+            descendants = database.get_subfolder_ids(src_id)
+            if target_id in descendants:
+                return
+        else:
+            target_id = None  # Move to root level
 
         # Compute new position (max sibling + 1)
         conn = database.get_connection()
         row = conn.execute(
-            "SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM folders WHERE parent_id = ?",
+            "SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM folders WHERE parent_id IS ?",
             (target_id,)
         ).fetchone()
         conn.close()
         new_pos = row["next_pos"] if row else 0
 
         database.move_folder(src_id, target_id, new_pos)
-        self._expanded_ids.add(target_id)
+        if target_id is not None:
+            self._expanded_ids.add(target_id)
         self._rebuild_tree()
         self.folder_changed.emit(self._current_folder_id)
 
@@ -442,6 +443,7 @@ class FolderTree(QWidget):
         """Programmatically select a folder by ID. None selects 'All'."""
         self._current_folder_id = folder_id
         self._select_folder(folder_id)
+        self.folder_changed.emit(folder_id)
 
     def _select_folder(self, folder_id):
         """Find item by folder_id and select it."""
